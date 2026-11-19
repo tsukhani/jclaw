@@ -250,6 +250,17 @@ class JavaRuntimeServiceTest extends UnitTest {
         var clone = Files.createDirectories(tmp.resolve("clone"));
         Files.createDirectories(clone.resolve(".git"));
         assertFalse(JavaRuntimeService.switchable(env(clone, system, "25.0.3", false)));
+        assertFalse(JavaRuntimeService.switchable(wsl(app, system)));
+    }
+
+    @Test
+    void wslIsKnownByItsKernelAndAWindowsDriveByItsFileSystem() {
+        assertTrue(JavaRuntimeService.wslWindowsDrive("5.15.167.4-microsoft-standard-WSL2", "9p"));
+        assertTrue(JavaRuntimeService.wslWindowsDrive("4.4.0-19041-Microsoft", "drvfs"));
+        assertFalse(JavaRuntimeService.wslWindowsDrive("5.15.167.4-microsoft-standard-WSL2", "ext4"));
+        assertFalse(JavaRuntimeService.wslWindowsDrive("6.8.0-48-generic", "9p"));
+        assertFalse(JavaRuntimeService.wslWindowsDrive(null, "9p"));
+        assertFalse(JavaRuntimeService.wslWindowsDrive("5.15.167.4-microsoft-standard-WSL2", null));
     }
 
     @Test
@@ -271,6 +282,22 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertRefused("Couldn't check Azul's catalog for a newer Java.", host, null, null, false);
         assertRefused("The runtime comes with the Docker image; pull a newer image to update Java.",
                 env(app, system, "25.0.3", true), managed, null, false);
+        assertRefused("JClaw runs in WSL from a Windows folder, where a start from Git Bash would also pick up a Java at "
+                + tmp.resolve("jre") + ", so it stays on the distro's Java; install JClaw with install.sh inside the "
+                + "distro for a Java it keeps patched.", wsl(app, system), managed, null, false);
+    }
+
+    @Test
+    void onlyASwitchBackToAnOlderPatchOfTheHostsMajorUndoesFixes() {
+        var system = tmp.resolve("system");
+        var managed = release("25.0.5");
+
+        assertFalse(JavaRuntimeService.undoesFixes(env(tmp, system, "25.0.4", false), managed));
+        assertFalse(JavaRuntimeService.undoesFixes(env(tmp, system, "25.0.5", false), managed));
+        assertTrue(JavaRuntimeService.undoesFixes(env(tmp, system, "25.0.5.1", false), managed));
+        assertTrue(JavaRuntimeService.undoesFixes(env(tmp, system, "25.0.6", false), managed));
+        assertFalse(JavaRuntimeService.undoesFixes(env(tmp, system, "27.0.1", false), managed));
+        assertFalse(JavaRuntimeService.undoesFixes(env(tmp, system, "24.0.2", false), managed));
     }
 
     @Test
@@ -628,6 +655,11 @@ class JavaRuntimeServiceTest extends UnitTest {
 
     private static Environment env(Path app, Path javaHome, String version, boolean container) {
         return new Environment(app, javaHome, version, "Azul Systems, Inc.", "Mac OS X", "aarch64", container);
+    }
+
+    /** install.ps1's WSL route: the distro's Java, running the install from a Windows drive. */
+    private static Environment wsl(Path app, Path javaHome) {
+        return new Environment(app, javaHome, "25.0.3", "Ubuntu", "Linux", "amd64", false, true);
     }
 
     private Path javaHome(String name, String libc) throws IOException {

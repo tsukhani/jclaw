@@ -102,9 +102,16 @@ public final class JavaRuntimeService {
      * @param osName      {@code os.name}
      * @param osArch      {@code os.arch}
      * @param container   true inside a container
+     * @param wslWindowsDrive true when JClaw runs in WSL from a Windows drive, as install.ps1's WSL route
+     *                        installs it
      */
     public record Environment(Path app, Path javaHome, String javaVersion, @Nullable String vendor,
-                              String osName, String osArch, boolean container) {
+                              String osName, String osArch, boolean container, boolean wslWindowsDrive) {
+
+        public Environment(Path app, Path javaHome, String javaVersion, @Nullable String vendor,
+                           String osName, String osArch, boolean container) {
+            this(app, javaHome, javaVersion, vendor, osName, osArch, container, false);
+        }
 
         /** The directory that holds the install and its {@code jre/}. */
         public Path home() {
@@ -244,10 +251,38 @@ public final class JavaRuntimeService {
     public static Environment environment() {
         var test = environmentOverride;
         if (test != null) return test;
-        return new Environment(Play.applicationPath.toPath(), Path.of(System.getProperty("java.home", "")),
+        var app = Play.applicationPath.toPath();
+        var osName = System.getProperty("os.name", "");
+        return new Environment(app, Path.of(System.getProperty("java.home", "")),
                 System.getProperty("java.version", ""), System.getProperty("java.vendor"),
-                System.getProperty("os.name", ""), System.getProperty("os.arch", ""),
-                UpgradeService.isContainer());
+                osName, System.getProperty("os.arch", ""),
+                UpgradeService.isContainer(),
+                osName.toLowerCase(Locale.ROOT).contains("linux") && wslWindowsDrive(kernelRelease(), fileStoreType(app)));
+    }
+
+    /**
+     * True for a kernel WSL runs ({@code 5.15.167.4-microsoft-standard-WSL2}, WSL 1's {@code 4.4.0-19041-Microsoft})
+     * and a file system of a Windows drive there: DrvFs, which WSL 2 serves over 9p.
+     */
+    public static boolean wslWindowsDrive(@Nullable String kernelRelease, @Nullable String fileStoreType) {
+        return kernelRelease != null && kernelRelease.toLowerCase(Locale.ROOT).contains("microsoft")
+                && ("drvfs".equals(fileStoreType) || "9p".equals(fileStoreType));
+    }
+
+    private static @Nullable String kernelRelease() {
+        try {
+            return Files.readString(Path.of("/proc/sys/kernel/osrelease"), StandardCharsets.UTF_8).strip();
+        } catch (IOException | RuntimeException _) {
+            return null;
+        }
+    }
+
+    private static @Nullable String fileStoreType(Path app) {
+        try {
+            return Files.getFileStore(app).type();
+        } catch (IOException | RuntimeException _) {
+            return null;
+        }
     }
 
     /** Compares real paths, so a link to the install or a {@code ..} in {@code java.home} still counts. */
@@ -270,11 +305,21 @@ public final class JavaRuntimeService {
     }
 
     /**
-     * True on a bundle install that runs on a Java it did not install. A download there is the switch to a
-     * Java of JClaw's own, {@link #managed}, which the next start installs as {@code <home>/jre}.
+     * True on a bundle install that runs on a Java it did not install, outside install.ps1's WSL route. A
+     * download there is the switch to a Java of JClaw's own, {@link #managed}, which the next start installs
+     * as {@code <home>/jre}.
      */
     public static boolean switchable(Environment env) {
-        return kind(env) == Kind.EXTERNAL && !sourceCheckout(env.app());
+        return kind(env) == Kind.EXTERNAL && !sourceCheckout(env.app()) && !env.wslWindowsDrive();
+    }
+
+    /**
+     * True when switching to {@code managed} would take a host Java back to an older patch of its own major, which
+     * {@link #stageable} refuses and the panel therefore never offers. A host Java of another major gives way to
+     * the one JClaw is tested on.
+     */
+    public static boolean undoesFixes(Environment env, Release managed) {
+        return major(managed.version()) == major(env.javaVersion()) && isNewer(env.javaVersion(), managed.version());
     }
 
     // ── The catalog ──────────────────────────────────────────────────────────
@@ -441,8 +486,8 @@ public final class JavaRuntimeService {
     }
 
     /**
-     * True when {@code candidate} is newer than the Java {@code env} runs: {@link #stageable}'s test, which the
-     * panel and the daily check ask too, so none offers what another would not.
+     * True when {@code candidate} is newer than the Java {@code env} runs: {@link #stageable}'s test of a patch to
+     * the built-in Java, which the panel and the daily check ask too, so none offers what another would not.
      */
     public static boolean isNewer(@Nullable Release candidate, Environment env) {
         return candidate != null && isNewer(candidate.version(), env.javaVersion());
@@ -529,6 +574,13 @@ public final class JavaRuntimeService {
                     throw new IllegalStateException("JClaw runs on a Java it did not install ("
                             + env.javaHome() + "), so that Java's vendor provides its updates.");
                 }
+                // jclaw.sh puts any Java at <home>/jre first, and a Git Bash start would get this Linux one.
+                if (env.wslWindowsDrive()) {
+                    throw new IllegalStateException("JClaw runs in WSL from a Windows folder, where a start from Git "
+                            + "Bash would also pick up a Java at " + env.home().resolve(JRE_DIR) + ", so it stays on "
+                            + "the distro's Java; install JClaw with install.sh inside the distro for a Java it keeps "
+                            + "patched.");
+                }
             }
             case BUILT_IN -> { }
         }
@@ -540,9 +592,7 @@ public final class JavaRuntimeService {
         if (kind == Kind.BUILT_IN && !isNewer(latest, env)) {
             throw new IllegalStateException("Java " + env.javaVersion() + " is up to date.");
         }
-        // A host Java of another major gives way to the one JClaw is tested on; one of the same major never to an older patch.
-        if (kind == Kind.EXTERNAL && major(latest.version()) == major(env.javaVersion())
-                && isNewer(env.javaVersion(), latest.version())) {
+        if (kind == Kind.EXTERNAL && undoesFixes(env, latest)) {
             throw new IllegalStateException("Java " + latest.version() + " is older than the Java " + env.javaVersion()
                     + " JClaw runs on, so switching to it would undo fixes.");
         }

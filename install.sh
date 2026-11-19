@@ -251,6 +251,7 @@ detect_os() {
 # system change — uninstall is just `rm -rf "$JCLAW_HOME"`.
 check_java() {
     HOST_JAVA=''
+    _host_java_home=${JAVA_HOME:-}
     if java_ok; then
         if upgrading || [ -n "$JCLAW_NO_JRE" ] || [ -z "$ARCH" ]; then
             substep "Java $JV detected ${DIM}($(command -v java))${RESET}"
@@ -266,17 +267,30 @@ check_java() {
         REASON="Java was not found on your PATH."
     fi
     if [ -z "$JCLAW_NO_JRE" ] && [ -n "$ARCH" ] && want_jre; then
-        if ! provision_jre; then
+        if ! find_jre; then
             [ -n "$HOST_JAVA" ] || die "$NO_JRE_WHY — install Java $MIN_JAVA yourself and re-run."
             warn "$NO_JRE_WHY, so JClaw runs on $HOST_JAVA."
             return
         fi
-        if ! java_ok; then
-            # A java that does not run at all was built for another C library or CPU.
-            "$JAVA_HOME/bin/java" -version >/dev/null 2>&1 \
-                || die "the Zulu JRE in $JAVA_HOME cannot run on this system ($AZUL_OS, $(uname -m)) — please report this."
-            [ -z "$JAVA_LACKS_MODULE" ] || die "the Zulu JRE in $JAVA_HOME lacks the $JAVA_MODULE module — please report this."
-            die "installed a Zulu JRE but \`java\` still isn't $MIN_JAVA+ — please report this."
+        _host_path=$PATH
+        # Called outside any condition, where `set -e` still stops the install on a failed step.
+        provision_jre
+        if ! java_ok "$JAVA_HOME/bin/java"; then
+            if ! "$JAVA_HOME/bin/java" -version >/dev/null 2>&1; then
+                # A java that does not run at all was built for another C library or CPU.
+                _why="the Zulu JRE in $JAVA_HOME cannot run on this system ($AZUL_OS, $(uname -m))"
+            elif [ -n "$JAVA_LACKS_MODULE" ]; then
+                _why="the Zulu JRE in $JAVA_HOME lacks the $JAVA_MODULE module"
+            else
+                _why="installed a Zulu JRE but \`java\` still isn't $MIN_JAVA+"
+            fi
+            [ -n "$HOST_JAVA" ] || die "$_why — please report this."
+            # jclaw.sh starts on any Java at $JRE_DIR, so a broken one cannot stay there.
+            rm -rf "$JRE_DIR"
+            PATH=$_host_path
+            if [ -n "${_host_java_home:-}" ]; then JAVA_HOME=$_host_java_home; else unset JAVA_HOME; fi
+            warn "$_why, so JClaw runs on $HOST_JAVA. Please report this."
+            return
         fi
         substep "Java $JV ready ${DIM}(managed JRE)${RESET}"
         return
@@ -293,19 +307,21 @@ upgrading() {
     [ -x "$APP_DIR/jclaw.sh" ] && [ -z "$JCLAW_FORCE_REINSTALL" ]
 }
 
-# True when a Java >= MIN_JAVA is on PATH. Sets JV to the major version.
+# True when a Java >= MIN_JAVA is on PATH, or is $1 when given. Sets JV to the major version.
 #   openjdk version "25.0.1" 2025-...  →  25
 #   java version "1.8.0_412"           →  1  (correctly rejected)
 java_ok() {
     JAVA_LACKS_MODULE=''
-    command -v java >/dev/null 2>&1 || return 1
+    # By its path for the downloaded JRE: dash runs the next java on PATH when one fails to exec.
+    _java=${1:-java}
+    command -v "$_java" >/dev/null 2>&1 || return 1
     # Pull the version from whichever line carries `version "…"` — never blindly
     # head -n1, since stderr noise (a broken-CWD `getcwd` warning, a
     # `Picked up JAVA_TOOL_OPTIONS` line) can precede it and break the parse.
-    JV=$(java -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -n1)
+    JV=$("$_java" -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -n1)
     [ -n "$JV" ] && [ "$JV" -ge "$MIN_JAVA" ] || return 1
     # A Java without the module refuses to boot JClaw, with nothing saying why.
-    java --add-modules="$JAVA_MODULE" -version >/dev/null 2>&1 || { JAVA_LACKS_MODULE=1; return 1; }
+    "$_java" --add-modules="$JAVA_MODULE" -version >/dev/null 2>&1 || { JAVA_LACKS_MODULE=1; return 1; }
 }
 
 # Decide whether to auto-install the JRE. Forced by JCLAW_INSTALL_JRE; else prompt
@@ -329,11 +345,10 @@ want_jre() {
     return 0
 }
 
-# Resolve, download, checksum-verify, and unpack the newest GA plain Zulu JRE for
-# this os/arch into $JRE_DIR, then put it on PATH for the rest of this run. Returns 1,
-# with NO_JRE_WHY saying why, only when the catalog offers no JRE; after that, a
-# failure is fatal.
-provision_jre() {
+# Find the newest GA plain Zulu JRE for this os/arch in Azul's catalog, setting JRE_URL and
+# JRE_SHA. Returns 1, with NO_JRE_WHY saying why, when the catalog cannot be reached or
+# offers no JRE.
+find_jre() {
     step "Installing Zulu JRE $MIN_JAVA ${DIM}($AZUL_OS/$ARCH)${RESET}"
     _api="${AZUL_API}?java_version=${MIN_JAVA}&os=${AZUL_OS}&arch=${ARCH}&archive_type=tar.gz&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20"
     if ! _json=$(http_get "$_api"); then
@@ -352,11 +367,16 @@ provision_jre() {
         NO_JRE_WHY="no Zulu JRE $MIN_JAVA found for $AZUL_OS/$ARCH in the Azul catalog"
         return 1
     fi
+}
+
+# Download, checksum-verify, and unpack the JRE find_jre chose into $JRE_DIR, then put it
+# on PATH for the rest of this run. Every failure is fatal.
+provision_jre() {
     substep "$(basename "$JRE_URL")"
 
     TMP_JRE=$(mktemp -d "${TMPDIR:-/tmp}/jclaw-jre.XXXXXX")
     _tb="$TMP_JRE/jre.tar.gz"
-    download "$JRE_URL" "$_tb"
+    download "$JRE_URL" "$_tb" || die "couldn't download the Zulu JRE from $JRE_URL."
     verify_sha256 "$_tb" "$JRE_SHA"
 
     rm -rf "$JRE_DIR"

@@ -33,15 +33,20 @@ class InstallerJavaScriptTest extends UnitTest {
     private static final List<String> VARIABLES = List.of("JCLAW_HOME", "JCLAW_NO_JRE", "JCLAW_INSTALL_JRE",
             "JCLAW_FORCE_REINSTALL", "APP_DIR", "JRE_DIR", "MIN_JAVA", "JAVA_MODULE", "AZUL_API", "TTY");
     private static final List<String> FUNCTIONS = List.of("step", "substep", "warn", "die", "check_java", "upgrading",
-            "java_ok", "want_jre", "provision_jre", "verify_sha256", "http_get", "java_missing", "download");
+            "java_ok", "want_jre", "find_jre", "provision_jre", "verify_sha256", "http_get", "java_missing", "download");
 
     private static final String TOP = "zulu25.38.107-ca-jre25.0.5-linux_x64";
     private static final String TARBALL = TOP + ".tar.gz";
+    private static final String OLD_TOP = "zulu25.36.15-ca-jre25.0.4-linux_x64";
+    private static final String NO_JAVA = "    Java was not found on your PATH. Auto-installing Zulu JRE 25 (set JCLAW_NO_JRE=1 to use "
+            + "your own Java)\n";
     private static final String CATALOG_QUERY = "https://api.azul.com/metadata/v1/zulu/packages/?java_version=25&os=linux"
             + "&arch=x64&archive_type=tar.gz&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20";
 
     @TempDir Path tmp;
     private byte[] jre;
+    /** The stub Zulu JRE's {@code bin/java}. */
+    private String jreJava = javaScript("25.0.5");
 
     record Result(int exit, String out) {}
 
@@ -61,20 +66,16 @@ class InstallerJavaScriptTest extends UnitTest {
                     Java 25 ready (managed JRE)
                 java=%3$s/bin/java
                 """.formatted(host, TARBALL, managedHome())), r);
-        assertEquals(List.of("curl -fsSL " + CATALOG_QUERY,
-                "curl -fL --progress-bar -o " + tmp + "/dl/jclaw-jre.X/jre.tar.gz https://cdn.azul.com/zulu/bin/" + TARBALL),
-                calls().stream().map(c -> c.replaceAll("jclaw-jre\\.[^/]+", "jclaw-jre.X")).toList());
+        assertEquals(List.of("curl -fsSL " + CATALOG_QUERY, cdnCall()), anonymousCalls());
     }
 
     @Test
     void aFreshInstallOnAHostWhoseOnlyJavaIs27RunsOnTheZuluJre25() throws Exception {
         var host = hostJava("27.0.1");
 
-        var r = install(host, Map.of());
-
-        assertEquals(0, r.exit(), r.out());
-        assertTrue(r.out().startsWith("    Found Java 27 at " + host + "/java, but JClaw runs on a Zulu JRE 25 of its own"), r.out());
-        assertTrue(r.out().endsWith("    Java 25 ready (managed JRE)\njava=" + managedHome() + "/bin/java\n"), r.out());
+        assertEquals(new Result(0, managedInstall("Found Java 27 at " + host + "/java, but JClaw runs on a Zulu JRE 25 of its "
+                + "own, which it keeps patched.")), install(host, Map.of()));
+        assertEquals(List.of("curl -fsSL " + CATALOG_QUERY, cdnCall()), anonymousCalls());
     }
 
     @Test
@@ -89,10 +90,14 @@ class InstallerJavaScriptTest extends UnitTest {
 
     @Test
     void withJclawNoJreAndNoUsableJavaTheInstallStopsAsBefore() throws Exception {
-        var r = install(null, Map.of("JCLAW_NO_JRE", "1"));
+        assertEquals(new Result(1, """
+                error: Java was not found on your PATH.
 
-        assertEquals(1, r.exit());
-        assertTrue(r.out().startsWith("error: Java was not found on your PATH.\n\nJClaw needs a Java 25+ runtime.\n"), r.out());
+                JClaw needs a Java 25+ runtime.
+                  Auto-install it:  re-run with JCLAW_INSTALL_JRE=1 (downloads a Zulu JRE 25).
+                  Or your package manager (after adding the Azul repo): sudo apt install zulu25-jdk
+                  Or download:      https://www.azul.com/downloads/?package=jre
+                """), install(null, Map.of("JCLAW_NO_JRE", "1")));
         assertEquals(List.of(), calls());
     }
 
@@ -101,12 +106,9 @@ class InstallerJavaScriptTest extends UnitTest {
         var host = hostJava("25.0.3");
         catalog("[]");
 
-        var r = install(host, Map.of());
-
-        assertEquals(0, r.exit(), r.out());
-        assertTrue(r.out().endsWith("==> Installing Zulu JRE 25 (linux/x64)\n"
+        assertEquals(new Result(0, autoInstalling(host) + "==> Installing Zulu JRE 25 (linux/x64)\n"
                 + "warning: no Zulu JRE 25 found for linux/x64 in the Azul catalog, so JClaw runs on Java 25 at " + host + "/java.\n"
-                + "java=" + host + "/java\n"), r.out());
+                + "java=" + host + "/java\n"), install(host, Map.of()));
         assertEquals(List.of("curl -fsSL " + CATALOG_QUERY), calls());
         assertFalse(Files.exists(tmp.resolve("home/jre")));
     }
@@ -124,22 +126,20 @@ class InstallerJavaScriptTest extends UnitTest {
     void anUnreachableCatalogLeavesAFreshInstallOnAUsableHostJava() throws Exception {
         var host = hostJava("25.0.3");
 
-        var r = install(host, Map.of("CATALOG_DOWN", "1"));
-
-        assertEquals(0, r.exit(), r.out());
-        assertTrue(r.out().endsWith("warning: couldn't reach the Azul JRE catalog, so JClaw runs on Java 25 at " + host
-                + "/java.\njava=" + host + "/java\n"), r.out());
+        assertEquals(new Result(0, autoInstalling(host) + "==> Installing Zulu JRE 25 (linux/x64)\n"
+                + "warning: couldn't reach the Azul JRE catalog, so JClaw runs on Java 25 at " + host + "/java.\n"
+                + "java=" + host + "/java\n"), install(host, Map.of("CATALOG_DOWN", "1")));
+        assertEquals(List.of("curl -fsSL " + CATALOG_QUERY), calls());
+        assertFalse(Files.exists(tmp.resolve("home/jre")));
     }
 
     @Test
     void withNoUsableJavaAndNoJreForTheSystemTheInstallStopsAndSaysWhy() throws Exception {
         catalog("[]");
 
-        var r = install(null, Map.of());
-
-        assertEquals(1, r.exit());
-        assertTrue(r.out().endsWith("error: no Zulu JRE 25 found for linux/x64 in the Azul catalog — "
-                + "install Java 25 yourself and re-run.\n"), r.out());
+        assertEquals(new Result(1, NO_JAVA + "==> Installing Zulu JRE 25 (linux/x64)\n"
+                + "error: no Zulu JRE 25 found for linux/x64 in the Azul catalog — install Java 25 yourself and re-run.\n"),
+                install(null, Map.of()));
     }
 
     @Test
@@ -147,11 +147,57 @@ class InstallerJavaScriptTest extends UnitTest {
         var host = hostJava("25.0.3");
         catalog(catalogFor("0".repeat(64)));
 
-        var r = install(host, Map.of());
+        assertEquals(new Result(1, autoInstalling(host) + "==> Installing Zulu JRE 25 (linux/x64)\n    " + TARBALL + "\n"
+                + "error: JRE checksum mismatch (wanted " + "0".repeat(64) + ", got " + sha(jreTarball()) + ") — aborting.\n"),
+                install(host, Map.of()));
+        assertFalse(Files.exists(tmp.resolve("home/jre")));
+    }
 
-        assertEquals(1, r.exit());
-        assertTrue(r.out().endsWith("error: JRE checksum mismatch (wanted " + "0".repeat(64) + ", got "
-                + sha(jreTarball()) + ") — aborting.\n"), r.out());
+    @Test
+    void aJreDownloadThatFailsStopsTheInstallEvenBesideAUsableJava() throws Exception {
+        var host = hostJava("25.0.3");
+
+        assertEquals(new Result(1, autoInstalling(host) + "==> Installing Zulu JRE 25 (linux/x64)\n    " + TARBALL + "\n"
+                + "error: couldn't download the Zulu JRE from https://cdn.azul.com/zulu/bin/" + TARBALL + ".\n"),
+                install(host, Map.of("CDN_DOWN", "1")));
+        assertEquals(List.of("curl -fsSL " + CATALOG_QUERY, cdnCall()), anonymousCalls());
+        assertFalse(Files.exists(tmp.resolve("home/jre")));
+    }
+
+    @Test
+    void aFailedDownloadWithNoChecksumLeavesTheJreAnUpgradeRunsOnInPlace() throws Exception {
+        existingInstall();
+        var old = Files.createDirectories(tmp.resolve("home/jre/" + OLD_TOP + "/bin"));
+        executable(old.resolve("java"), javaScript("25.0.4"));
+        catalog(catalogFor("").replace(",\"sha256_hash\":\"\"", ""));
+
+        assertEquals(new Result(1, NO_JAVA + "==> Installing Zulu JRE 25 (linux/x64)\n    " + TARBALL + "\n"
+                + "error: couldn't download the Zulu JRE from https://cdn.azul.com/zulu/bin/" + TARBALL + ".\n"),
+                install(null, Map.of("CDN_DOWN", "1")));
+        assertTrue(Files.isExecutable(old.resolve("java")), "the JRE the install runs on was deleted");
+    }
+
+    @Test
+    void aZuluJreThatCannotRunBesideAUsableJavaLeavesTheInstallOnTheHostsJava() throws Exception {
+        var host = hostJava("25.0.3");
+        jreJava = "#!/no/such/loader\n";
+
+        assertEquals(new Result(0, autoInstalling(host) + "==> Installing Zulu JRE 25 (linux/x64)\n    " + TARBALL + "\n"
+                + "    checksum verified (sha256)\n    installed → " + managedHome() + "\n"
+                + "warning: the Zulu JRE in " + managedHome() + " cannot run on this system (linux, " + machine()
+                + "), so JClaw runs on Java 25 at " + host + "/java. Please report this.\n"
+                + "java=" + host + "/java\n"), install(host, Map.of()));
+        assertFalse(Files.exists(tmp.resolve("home/jre")), "a JRE left at jre/ would be the one jclaw.sh starts on");
+    }
+
+    @Test
+    void aZuluJreThatCannotRunWithNoUsableJavaStopsTheInstall() throws Exception {
+        jreJava = "#!/no/such/loader\n";
+
+        assertEquals(new Result(1, NO_JAVA + "==> Installing Zulu JRE 25 (linux/x64)\n    " + TARBALL + "\n"
+                + "    checksum verified (sha256)\n    installed → " + managedHome() + "\n"
+                + "error: the Zulu JRE in " + managedHome() + " cannot run on this system (linux, " + machine()
+                + ") — please report this.\n"), install(null, Map.of()));
     }
 
     @Test
@@ -167,11 +213,7 @@ class InstallerJavaScriptTest extends UnitTest {
     void anUpgradeWithNoUsableJavaStillGetsTheZuluJre() throws Exception {
         existingInstall();
 
-        var r = install(null, Map.of());
-
-        assertEquals(0, r.exit(), r.out());
-        assertTrue(r.out().startsWith("    Java was not found on your PATH. Auto-installing Zulu JRE 25"), r.out());
-        assertTrue(r.out().endsWith("java=" + managedHome() + "/bin/java\n"), r.out());
+        assertEquals(new Result(0, managedInstall("Java was not found on your PATH.")), install(null, Map.of()));
     }
 
     @Test
@@ -179,10 +221,9 @@ class InstallerJavaScriptTest extends UnitTest {
         var host = hostJava("25.0.3");
         existingInstall();
 
-        var r = install(host, Map.of("JCLAW_FORCE_REINSTALL", "1"));
-
-        assertEquals(0, r.exit(), r.out());
-        assertTrue(r.out().endsWith("java=" + managedHome() + "/bin/java\n"), r.out());
+        assertEquals(new Result(0, managedInstall("Found Java 25 at " + host + "/java, but JClaw runs on a Zulu JRE 25 of its "
+                + "own, which it keeps patched.")), install(host, Map.of("JCLAW_FORCE_REINSTALL", "1")));
+        assertEquals(List.of("curl -fsSL " + CATALOG_QUERY, cdnCall()), anonymousCalls());
     }
 
     @Test
@@ -242,6 +283,34 @@ class InstallerJavaScriptTest extends UnitTest {
         return new Result(p.exitValue(), out);
     }
 
+    /** What a fresh install that gets the Zulu JRE prints, after {@code reason}. */
+    private String managedInstall(String reason) {
+        return "    " + reason + " Auto-installing Zulu JRE 25 (set JCLAW_NO_JRE=1 to use your own Java)\n"
+                + "==> Installing Zulu JRE 25 (linux/x64)\n    " + TARBALL + "\n    checksum verified (sha256)\n"
+                + "    installed → " + managedHome() + "\n    Java 25 ready (managed JRE)\njava=" + managedHome() + "/bin/java\n";
+    }
+
+    private static String autoInstalling(Path host) {
+        return "    Found Java 25 at " + host + "/java, but JClaw runs on a Zulu JRE 25 of its own, which it keeps patched. "
+                + "Auto-installing Zulu JRE 25 (set JCLAW_NO_JRE=1 to use your own Java)\n";
+    }
+
+    private String cdnCall() {
+        return "curl -fL --progress-bar -o " + tmp + "/dl/jclaw-jre.X/jre.tar.gz https://cdn.azul.com/zulu/bin/" + TARBALL;
+    }
+
+    /** The calls, with mktemp's random suffix named X. */
+    private List<String> anonymousCalls() throws IOException {
+        return calls().stream().map(c -> c.replaceAll("jclaw-jre\\.[^/]+", "jclaw-jre.X")).toList();
+    }
+
+    private static String machine() throws Exception {
+        var p = new ProcessBuilder("uname", "-m").start();
+        var out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+        assertEquals(0, p.waitFor());
+        return out;
+    }
+
     private String managedHome() {
         return tmp.resolve("home/jre/" + TOP).toString();
     }
@@ -283,7 +352,7 @@ class InstallerJavaScriptTest extends UnitTest {
         if (jre != null) return jre;
         var bytes = new ByteArrayOutputStream();
         try (var tar = new TarArchiveOutputStream(new GzipCompressorOutputStream(bytes))) {
-            for (var f : Map.of(TOP + "/release", "JAVA_VERSION=\"25.0.5\"\n", TOP + "/bin/java", javaScript("25.0.5")).entrySet()) {
+            for (var f : Map.of(TOP + "/release", "JAVA_VERSION=\"25.0.5\"\n", TOP + "/bin/java", jreJava).entrySet()) {
                 var data = f.getValue().getBytes(StandardCharsets.UTF_8);
                 var entry = new TarArchiveEntry(f.getKey());
                 entry.setSize(data.length);
@@ -315,7 +384,7 @@ class InstallerJavaScriptTest extends UnitTest {
                     done
                     case "$url" in
                         https://api.azul.com/*) [ -z "${CATALOG_DOWN:-}" ] || exit 7; cat "$CATALOG" ;;
-                        https://cdn.azul.com/*) cp "$JRE_TARBALL" "$out" ;;
+                        https://cdn.azul.com/*) [ -z "${CDN_DOWN:-}" ] || exit 22; cp "$JRE_TARBALL" "$out" ;;
                         *) exit 22 ;;
                     esac
                     """);
@@ -329,7 +398,7 @@ class InstallerJavaScriptTest extends UnitTest {
         if (!Files.isDirectory(bin)) {
             Files.createDirectories(bin);
             for (var tool : List.of("sed", "grep", "tr", "head", "cat", "cp", "rm", "mkdir", "mktemp", "tar", "gzip",
-                    "find", "dirname", "basename", "awk", "shasum", "sha256sum", "perl")) {
+                    "find", "dirname", "basename", "awk", "shasum", "sha256sum", "perl", "uname")) {
                 var found = which(tool);
                 if (found != null) Files.createSymbolicLink(bin.resolve(tool), found);
             }

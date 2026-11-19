@@ -604,16 +604,39 @@ class ApiSystemControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aSwitchThatWouldGoBackToAnOlderPatchIsRefused() throws Exception {
+    void aSwitchThatWouldGoBackToAnOlderPatchIsNeitherOfferedNorStaged() throws Exception {
         login();
         JavaRuntimeService.setEnvironmentForTest(hostJava("25.0.6"));
         JavaRuntimeService.setStagerForTest((r, home, p) -> stagings.add(r));
 
-        assertEquals("25.0.5", json(GET("/api/system/java-runtime")).get("managedVersion").getAsString());
+        var offered = json(GET("/api/system/java-runtime"));
+        assertEquals("external", offered.get("kind").getAsString());
+        assertFalse(offered.get("switchable").getAsBoolean());
+        assertTrue(offered.get("managedVersion").isJsonNull());
         var refused = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(409, refused.status.intValue());
         assertEquals("Java 25.0.5 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes.",
                 json(refused).get("message").getAsString());
+        assertEquals(0, stagings.size());
+    }
+
+    @Test
+    void aWslInstallOnAWindowsDriveOffersNoSwitch() throws Exception {
+        login();
+        var host = hostJava("25.0.3");
+        JavaRuntimeService.setEnvironmentForTest(new JavaRuntimeService.Environment(host.app(), host.javaHome(), "25.0.3",
+                "Ubuntu", "Linux", "amd64", false, true));
+        JavaRuntimeService.setStagerForTest((r, home, p) -> stagings.add(r));
+
+        var offered = json(GET("/api/system/java-runtime"));
+        assertEquals("external", offered.get("kind").getAsString());
+        assertFalse(offered.get("switchable").getAsBoolean());
+        assertTrue(offered.get("managedVersion").isJsonNull());
+        var refused = POST("/api/system/java-runtime", "application/json", "{}");
+        assertEquals(409, refused.status.intValue());
+        assertEquals("JClaw runs in WSL from a Windows folder, where a start from Git Bash would also pick up a Java at "
+                + tmp.resolve("jre") + ", so it stays on the distro's Java; install JClaw with install.sh inside the "
+                + "distro for a Java it keeps patched.", json(refused).get("message").getAsString());
         assertEquals(0, stagings.size());
     }
 

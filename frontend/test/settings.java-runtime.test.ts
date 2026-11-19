@@ -397,9 +397,9 @@ describe('SettingsJavaRuntimePanel — the switch from a host Java', () => {
   })
 
   it('shows the refusal when the backend will not switch', async () => {
-    runtime = hostJava({ currentVersion: '25.0.6', updateAvailable: false, latestVersion: '25.0.6' })
+    runtime = hostJava()
     stageReply = { status: 409, body: { status: 'error', code: 'conflict',
-      message: 'Java 25.0.5 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes.' } }
+      message: '/opt/jclaw is not writable, so a new Java cannot be staged beside /opt/jclaw/jre.' } }
     const c = await mounted()
 
     await panelButton(c, 'Switch to Java 25.0.5')!.trigger('click')
@@ -409,7 +409,7 @@ describe('SettingsJavaRuntimePanel — the switch from a host Java', () => {
 
     expect(stagePosts).toBe(1)
     await vi.waitFor(() => expect(c.find('[role="status"]').text())
-      .toBe('Java 25.0.5 is older than the Java 25.0.6 JClaw runs on, so switching to it would undo fixes.'))
+      .toBe('/opt/jclaw is not writable, so a new Java cannot be staged beside /opt/jclaw/jre.'))
   })
 })
 

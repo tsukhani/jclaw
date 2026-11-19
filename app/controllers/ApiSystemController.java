@@ -326,7 +326,8 @@ public class ApiSystemController extends Controller {
      *                             Settings or by {@code JCLAW_AOT=off}
      * @param switchable           true on a bundle install running a Java it did not install, where the
      *                             POST stages a Java of JClaw's own that the next start installs as
-     *                             {@code <home>/jre}
+     *                             {@code <home>/jre}: false on install.ps1's WSL route, and when that Java
+     *                             is an older patch of the host's major
      * @param managedVersion       the Java that switch installs, or null when there is no switch or
      *                             Azul's catalog could not be reached
      */
@@ -359,6 +360,11 @@ public class ApiSystemController extends Controller {
         var last = JavaRuntimeService.lastStart(env.app());
         boolean switchable = JavaRuntimeService.switchable(env);
         var managed = switchable ? JavaRuntimeService.managed(env, latest, Boolean.TRUE.equals(refresh)) : null;
+        // The POST refuses a switch back to an older patch, so the GET never offers one.
+        if (managed != null && JavaRuntimeService.undoesFixes(env, managed)) {
+            switchable = false;
+            managed = null;
+        }
 
         renderJSON(GSON.toJson(new JavaRuntimePreflight(
                 JavaRuntimeService.kind(env).label, env.javaVersion(), env.vendor(), latestVersion,
@@ -377,8 +383,9 @@ public class ApiSystemController extends Controller {
      * POST /api/system/java-runtime — download the newest patch for the next start to install, and ack.
      * Returns 202 while the download runs in this JVM; the GET reports its progress. On a bundle install
      * running a Java it did not install, the download is the switch to a Java of JClaw's own. 409 when
-     * there is nothing this install may download: a source checkout, a container, a download already
-     * running or staged, no newer patch, or a switch that would go back to an older patch.
+     * there is nothing this install may download: a source checkout, a container, install.ps1's WSL
+     * route, a download already running or staged, no newer patch, or a switch that would go back to an
+     * older patch.
      */
     @AgentAccess(value = OPERATOR_ONLY, reason = "downloads a Java runtime that the next start installs")
     public static void stageJavaRuntime() {

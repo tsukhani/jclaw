@@ -82,7 +82,8 @@ The installer does these steps:
    the SHA-256 that Azul publishes. JClaw runs on this Java, and
    **Settings → Maintenance → Java runtime** keeps it patched. The installer does this even when
    Java is already installed. It uses your own Java 25 or later, with the `jdk.incubator.vector`
-   module, only when you set `JCLAW_NO_JRE=1`, or when Azul has no JRE for your system.
+   module, only when you set `JCLAW_NO_JRE=1`, when Azul's catalog cannot be reached, or when
+   Azul has no JRE that runs on your system.
 2. It downloads `jclaw-bundle.zip` from the latest GitHub Release. This self-contained bundle
    holds everything JClaw needs.
 3. It checks the download. [How the installer checks the download](#how-the-installer-checks-the-download)
@@ -98,8 +99,8 @@ On Windows, JClaw runs inside **Git Bash** or **WSL**, because its launcher is a
 The installer uses Git Bash if it finds it. If it finds only WSL, it starts JClaw there.
 If it finds neither, it still installs JClaw, and then tells you how to run it.
 
-With WSL, JClaw runs on the Java inside your WSL distro, and `install.ps1` downloads no Java for
-it. Install Java 25 inside the distro first. For the Java that JClaw keeps patched, run the
+With WSL, JClaw runs on the Java inside your WSL distro, and neither `install.ps1` nor Settings
+downloads a Java for it. Install Java 25 inside the distro first. For the Java that JClaw keeps patched, run the
 `install.sh` one-liner inside the distro instead: it installs JClaw in the distro's home folder,
 with its own Zulu JRE.
 

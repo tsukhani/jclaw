@@ -241,7 +241,8 @@ class JavaRuntimeScriptTest extends UnitTest {
         var out = run(home, Map.of("JAVA_HOME", "", "PATH", host.resolve("bin") + File.pathSeparator + System.getenv("PATH")),
                 "apply_staged_jre");
 
-        assertTrue(out.contains("    Java runtime: switched from the host's Java 25.0.3 to Java 25.0.5 at " + home + "/jre\n"), out);
+        assertEquals("==> Installing the Java runtime downloaded in Settings...\n"
+                + "    Java runtime: switched from the host's Java 25.0.3 to Java 25.0.5 at " + home + "/jre\n", out);
         assertEquals(List.of(NEW_TOP), listing(home.resolve("jre")));
     }
 
@@ -283,7 +284,8 @@ class JavaRuntimeScriptTest extends UnitTest {
                 "apply_staged_jre; echo \"JAVA_HOME=$JAVA_HOME\"");
 
         var line = "kept the host's Java 25.0.3: could not move Java 25.0.5 into " + home + "/jre";
-        assertTrue(out.contains("    Java runtime: " + line + "\nJAVA_HOME=" + host + "\n"), out);
+        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: " + line + "\n"
+                + "JAVA_HOME=" + host + "\n", out);
         assertEquals(line, status(home));
         assertFalse(Files.exists(home.resolve("jre")));
         assertFalse(Files.exists(home.resolve("jre.new")));
@@ -299,7 +301,7 @@ class JavaRuntimeScriptTest extends UnitTest {
         var out = run(home, Map.of("JAVA_HOME", host.toString()), "apply_staged_jre");
 
         var line = "kept the host's Java 25.0.3: " + home + "/jre holds no Java; move it away to install Java 25.0.5";
-        assertTrue(out.contains("    Java runtime: " + line + "\n"), out);
+        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: " + line + "\n", out);
         assertEquals(line, status(home));
         assertEquals(List.of("notes"), listing(home.resolve("jre")));
         assertFalse(Files.exists(home.resolve("jre.staged")));
