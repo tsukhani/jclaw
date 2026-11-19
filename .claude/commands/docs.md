@@ -108,7 +108,7 @@ Present a table (file · drift item · `current → correct` · handling · FIX/
 
 15. Re-verify that every command, script, subcommand, and file path the **edited** docs now reference actually exists (`./jclaw.sh` subcommands, `pnpm` scripts in `package.json`, routes/controllers, on-disk paths).
 16. Confirm internal markdown and `/guide#` links in edited files resolve to real targets. Prove the link checker can fail first: feed it a copy with one bad anchor.
-17. For every source or config file edited, run its gate from `docs/README.md` § Gates. Check first that no test run is in flight (`jcmd -l | grep -E "playAutotest|FirePhoque"`): never compile under one. The Java gate's compile also runs doclint, so a Javadoc edit that breaks a reference fails there.
+17. For every source or config file edited, run its gate from `docs/README.md` § Gates. Check first that no test run is in flight (`pgrep -fl 'gradle-wrapper[.]jar playAutotest|[F]irePhoque'`): never compile under one. The Java gate's compile also runs doclint, so a Javadoc edit that breaks a reference fails there.
 18. For approved shipped-text edits, run the tests found in step 14.
 
 **Phase 6 — Commit locally & report (stop here; never push)**
