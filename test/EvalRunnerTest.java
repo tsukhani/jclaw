@@ -137,7 +137,7 @@ class EvalRunnerTest extends UnitTest {
                 "beta", EvalScorer.Response.failed("provider timeout")));
 
         assertTrue(current.regressionsAgainst(baseline).isEmpty(),
-                "beta stopped answering, which says nothing about whether its behaviour changed");
+                "beta stopped answering, which says nothing about whether its behavior changed");
     }
 
     @Test

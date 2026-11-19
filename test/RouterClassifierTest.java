@@ -90,7 +90,7 @@ class RouterClassifierTest extends UnitTest {
 
         assertEquals("tiny", body.get("model").getAsString());
         assertFalse(body.has("tools") && !body.getAsJsonArray("tools").isEmpty(),
-                "a classification needs no tool catalogue: " + body);
+                "a classification needs no tool catalog: " + body);
     }
 
     @Test
@@ -236,7 +236,7 @@ class RouterClassifierTest extends UnitTest {
         var c = HttpFactories.callWith(canned(200, completion("coding")),
                 () -> RouterClassifier.classify("yes please", TaskClass.REASONING, 0, withClassifier()));
         assertEquals(TaskClass.REASONING, c.taskClass());
-        assertTrue(requests.isEmpty(), "a bare acknowledgement must not cost a model call");
+        assertTrue(requests.isEmpty(), "a bare acknowledgment must not cost a model call");
         assertNull(c.classifierMs());
     }
 

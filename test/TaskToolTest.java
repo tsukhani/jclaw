@@ -851,7 +851,7 @@ class TaskToolTest extends UnitTest {
 
         var reply = execute("""
                 {"action":"cancelTask","name":"cancelme"}""");
-        assertTrue(reply.contains("cancelled"), reply);
+        assertTrue(reply.contains("canceled"), reply);
         var fresh = (Task) Tx.run(() -> Task.findById(taskId));
         assertEquals(Task.Status.CANCELLED, fresh.status,
                 "PENDING → CANCELLED");
@@ -1023,7 +1023,7 @@ class TaskToolTest extends UnitTest {
     void listRemindersExcludesCancelledReminder() {
         tool.execute("""
                 {"action":"createTask","name":"gone","schedule":"30m",
-                 "payloadType":"reminder","description":"will be cancelled"}""", agent);
+                 "payloadType":"reminder","description":"will be canceled"}""", agent);
         tool.execute("""
                 {"action":"cancelTask","name":"gone"}""", agent);
         // findReminders is scoped to PENDING/ACTIVE, so a CANCELLED reminder

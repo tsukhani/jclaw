@@ -195,8 +195,8 @@ class AgentSpawnToolTest extends UnitTest {
         var web = ConversationService.create(main, "web", "u-chain");
         commitAndReopen();
         scripts.add(new Script("Research the market.", "agent_spawn",
-                Map.of("agent", "analyst", "task", "Analyse the figures."), "researcher saw: "));
-        scripts.add(new Script("Analyse the figures.", "agent_spawn",
+                Map.of("agent", "analyst", "task", "Analyze the figures."), "researcher saw: "));
+        scripts.add(new Script("Analyze the figures.", "agent_spawn",
                 Map.of("agent", "auditor", "task", "Audit the numbers."), "analyst saw: "));
         scripts.add(Script.replies("Audit the numbers.", "AUDITED"));
 
@@ -279,8 +279,8 @@ class AgentSpawnToolTest extends UnitTest {
         var web = ConversationService.create(main, "web", "u-turn-budget");
         commitAndReopen();
         scripts.add(new Script("Research the market.", "agent_spawn",
-                Map.of("agent", "analyst", "task", "Analyse the figures."), "researcher saw: "));
-        scripts.add(Script.replies("Analyse the figures.", "FIGURES_ANALYSED"));
+                Map.of("agent", "analyst", "task", "Analyze the figures."), "researcher saw: "));
+        scripts.add(Script.replies("Analyze the figures.", "FIGURES_ANALYZED"));
         scripts.add(new Script("Write the summary.", "agent_spawn",
                 Map.of("agent", "editor", "task", "Edit the summary."), "writer saw: "));
         scripts.add(Script.replies("Edit the summary.", "EDITED"));
@@ -294,7 +294,7 @@ class AgentSpawnToolTest extends UnitTest {
         SubagentRun toB = SubagentRun.find("childAgent.id = ?1", b.id).first();
         SubagentRun toC = SubagentRun.find("childAgent.id = ?1", c.id).first();
         assertEquals(List.of(
-                expectedResult(toA, "researcher saw: " + expectedResult(toB, "FIGURES_ANALYSED", b), a),
+                expectedResult(toA, "researcher saw: " + expectedResult(toB, "FIGURES_ANALYZED", b), a),
                 expectedResult(toC, "writer saw: Agent hand-off refused: hand-off limit 3 reached (hand-offs so far: 3)."
                         + " Reply with what you have.", c)),
                 results, "main's second chain started with the first chain's two hand-offs already counted");

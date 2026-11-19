@@ -227,8 +227,8 @@ class TaskExecutionHandlerTest extends UnitTest {
 
     @Test
     void cancelledCronTaskIsSkippedWithoutOpeningRun() throws Exception {
-        var agent = createAgent("cron-cancelled-agent");
-        var task = persistTask(agent, "Cancelled cron", "Should skip.",
+        var agent = createAgent("cron-canceled-agent");
+        var task = persistTask(agent, "Canceled cron", "Should skip.",
                 Task.Type.CRON, null, "0 * * * * *", null);
         task.status = Task.Status.CANCELLED;
         task.save();
@@ -246,10 +246,10 @@ class TaskExecutionHandlerTest extends UnitTest {
         // self-reschedule because the cancelled-skip falls through to
         // defaultCompletion() per the handler body.
         assertTrue(handler instanceof CompletionHandler.OnCompleteRemove,
-                "cancelled-skip returns OnCompleteRemove; got: " + handler);
+                "canceled-skip returns OnCompleteRemove; got: " + handler);
         // No SchedulerClient calls from the completion path either.
         assertTrue(stub.schedules.isEmpty(),
-                "cancelled-skip must not schedule a next tick");
+                "canceled-skip must not schedule a next tick");
     }
 
     // === INTERVAL self-rescheduling at completion-time + intervalSeconds ===
@@ -924,7 +924,7 @@ class TaskExecutionHandlerTest extends UnitTest {
     @Test
     void runNowArmsOnlyAfterTheRevivedStatusCommits() {
         var agent = createAgent("runnow-commit-agent");
-        var task = persistTask(agent, "Cancelled one-shot", "Now.",
+        var task = persistTask(agent, "Canceled one-shot", "Now.",
                 Task.Type.IMMEDIATE, null, null, null);
         task.status = Task.Status.CANCELLED;
         task.save();
@@ -946,7 +946,7 @@ class TaskExecutionHandlerTest extends UnitTest {
     @Test
     void registerArmsOnlyAfterTheReenabledStatusCommits() {
         var agent = createAgent("reenable-commit-agent");
-        var task = persistTask(agent, "Cancelled interval", "Recur.",
+        var task = persistTask(agent, "Canceled interval", "Recur.",
                 Task.Type.INTERVAL, null, null, 3600L);
         task.status = Task.Status.CANCELLED;
         task.save();

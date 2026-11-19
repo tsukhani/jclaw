@@ -99,7 +99,7 @@ public final class JevRun {
             }
             out.append(steps.isEmpty() ? "No actions executed.\n" : "Actions:\n");
             appendSteps(out);
-            out.append("\nDONE and BLOCKED are Jev's judgement, not a verified result: check the final page "
+            out.append("\nDONE and BLOCKED are Jev's judgment, not a verified result: check the final page "
                     + "below against the goal before relying on it.\n");
             if (page != null) {
                 var text = page.get("text").getAsString();

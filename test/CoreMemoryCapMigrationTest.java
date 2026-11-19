@@ -151,7 +151,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
         assertEquals(cap(), liveCore(), "exactly the cap survives as core");
         assertEquals(5, MemoryStoreFactory.get().list(String.valueOf(agent.id)).stream()
                         .filter(m -> MemoryCategory.ENTITY.label.equals(m.category())).count(),
-                "the overflow is recategorised, not deleted");
+                "the overflow is recategorized, not deleted");
     }
 
     @Test
@@ -184,7 +184,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
 
         CoreMemoryCapMigration.runForTest(agentId());
 
-        assertEquals(cap() + 1L, liveCore(), "nothing may be recategorised on a failed classification");
+        assertEquals(cap() + 1L, liveCore(), "nothing may be recategorized on a failed classification");
     }
 
     @Test
@@ -196,7 +196,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
 
         CoreMemoryCapMigration.runForTest(agentId());
 
-        assertEquals(cap(), liveCore(), "an answer of 'core' must be coerced away, not honoured");
+        assertEquals(cap(), liveCore(), "an answer of 'core' must be coerced away, not honored");
     }
 
     @Test

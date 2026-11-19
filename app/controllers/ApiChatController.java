@@ -415,7 +415,7 @@ public class ApiChatController extends Controller {
         var idle = InactivityTimer.start(chatStreamTimeout(), CHAT_STREAM_REARM_MIN, () -> {
             close.idleTimedOut().set(true);
             EventLogger.warn("llm", agent.name, "web",
-                    "Chat stream saw no frame for %s — closing it and cancelling the turn".formatted(chatStreamTimeout()));
+                    "Chat stream saw no frame for %s — closing it and canceling the turn".formatted(chatStreamTimeout()));
             sse.close();
         });
 
@@ -429,7 +429,7 @@ public class ApiChatController extends Controller {
             TurnCancellation.cancel(cancelled);
             if (!close.finished().get() && !close.idleTimedOut().get()) {
                 EventLogger.info("llm", agent.name, "web",
-                        "Chat stream closed by the client before the turn finished — cancelling the turn");
+                        "Chat stream closed by the client before the turn finished — canceling the turn");
             }
         });
 

@@ -395,9 +395,9 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
 
         var body = getContent(GET("/api/subagent-runs?parentAgentId=" + ids[0]));
         assertEquals("\"summarize the release notes\"", fieldOfRun(body, ids[1], "label"),
-                "labelled run carries its label: " + body);
+                "labeled run carries its label: " + body);
         assertEquals("null", fieldOfRun(body, ids[2], "label"),
-                "unlabelled run carries a null label: " + body);
+                "unlabeled run carries a null label: " + body);
     }
 
     @Test

@@ -158,7 +158,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 duplicates don't accumulate. A one-shot reminder is SCHEDULED \
                 rather than recurring, so it does NOT appear in \
                 listRecurringTasks — use listReminders to find one before \
-                updating or cancelling it by name.
+                updating or canceling it by name.
 
                 When the user says "remind me to X", create a task with \
                 payloadType="reminder". When normalizing an EXISTING task whose \
@@ -187,7 +187,7 @@ public class TaskTool implements ToolRegistry.Tool {
                         SchemaKeys.DESCRIPTION, "Task instructions — the WORK only. For an agent task "
                                 + "ALWAYS pass a JSON array of ordered step strings, never a prose "
                                 + "paragraph, even for a single step (a one-element array), e.g. "
-                                + "[\"Fetch yesterday's orders\", \"Summarise the totals\"]. Do NOT add a "
+                                + "[\"Fetch yesterday's orders\", \"Summarize the totals\"]. Do NOT add a "
                                 + "'send it to <channel>' step — that is `delivery`'s job, delivered "
                                 + "automatically after the run. The ONLY case passing a plain string is a "
                                 + "reminder, whose description is the verbatim text the user sees (e.g. "
@@ -878,12 +878,12 @@ public class TaskTool implements ToolRegistry.Tool {
             TaskSchedulingService.cancel(taskId);
         }
         EventLogger.info("TASK_MGMT_DELETE", agent.name, null,
-                "Task '%s' (%d match%s) cancelled via tool"
+                "Task '%s' (%d match%s) canceled via tool"
                         .formatted(name, cancelledIds.size(),
                                 cancelledIds.size() == 1 ? "" : "es"));
         return cancelledIds.size() == 1
-                ? "Task '%s' cancelled.".formatted(name)
-                : "%d tasks named '%s' cancelled.".formatted(cancelledIds.size(), name);
+                ? "Task '%s' canceled.".formatted(name)
+                : "%d tasks named '%s' canceled.".formatted(cancelledIds.size(), name);
     }
 
     /**

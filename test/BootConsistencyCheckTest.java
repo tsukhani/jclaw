@@ -118,7 +118,7 @@ class BootConsistencyCheckTest extends UnitTest {
         persistTask("running", Task.Status.RUNNING);
         persistTask("completed", Task.Status.COMPLETED);
         persistTask("failed", Task.Status.FAILED);
-        persistTask("cancelled", Task.Status.CANCELLED);
+        persistTask("canceled", Task.Status.CANCELLED);
 
         int registered = BootConsistencyCheck.sweep(stub.proxy());
         commitAndReopen();

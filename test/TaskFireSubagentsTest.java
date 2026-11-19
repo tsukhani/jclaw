@@ -79,7 +79,7 @@ class TaskFireSubagentsTest extends UnitTest {
                 Thread.sleep(20);
             }
             assertEquals(SubagentRun.Status.KILLED, row.status);
-            assertTrue(row.outcome.contains("task run that started it was cancelled"), row.outcome);
+            assertTrue(row.outcome.contains("task run that started it was canceled"), row.outcome);
         } finally {
             SubagentRegistry.unregister(childRunId);
             TaskRunRegistry.unregister(taskRunId);

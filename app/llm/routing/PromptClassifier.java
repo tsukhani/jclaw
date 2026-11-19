@@ -194,7 +194,7 @@ public final class PromptClassifier {
         var medium = matches(lower, MEDIUM_REASONING);
         if (NEGATED_CAPABILITY.matcher(lower).find()) medium.add("a negated capability");
         if (medium.size() >= 2) {
-            return new Classification(TaskClass.REASONING, List.of("judgement cues: " + String.join(", ", medium)));
+            return new Classification(TaskClass.REASONING, List.of("judgment cues: " + String.join(", ", medium)));
         }
 
         var summary = SUMMARY.matcher(lower);

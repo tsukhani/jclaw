@@ -237,7 +237,7 @@ public record CertificationSplit(String split, String set, long seed, List<Strin
     public List<Case> casesFrom(Source source) {
         return ids.stream().map(id -> {
             var c = source.cases().get(id);
-            if (c == null) throw new IllegalArgumentException("split id " + id + " has no labelled case");
+            if (c == null) throw new IllegalArgumentException("split id " + id + " has no labeled case");
             return c;
         }).toList();
     }

@@ -206,7 +206,7 @@ public final class TelegramCallbackDispatcher {
     private static void handleCancel(String botToken, InboundCallback cb) {
         TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(), null, false);
         TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),
-                "× Cancelled. Send <code>/model</code> to reopen.", null);
+                "× Canceled. Send <code>/model</code> to reopen.", null);
     }
 
     private static void handleSelect(String botToken, Agent agent, InboundCallback cb,

@@ -474,7 +474,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         long countAtSeal = server.countRequests("sendChatAction");
         Thread.sleep(150);
         assertEquals(countAtSeal, server.countRequests("sendChatAction"),
-                "no further sendChatAction after seal — heartbeat fully cancelled");
+                "no further sendChatAction after seal — heartbeat fully canceled");
     }
 
     // ==================== JCLAW-369: reply target + topic-aware sink ====================

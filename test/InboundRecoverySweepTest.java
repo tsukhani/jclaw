@@ -604,7 +604,7 @@ class InboundRecoverySweepTest extends UnitTest {
 
         assertEquals(2, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
 
-        assertFalse(liveTurnCancel.get(), "no restored message cancelled the live turn");
+        assertFalse(liveTurnCancel.get(), "no restored message canceled the live turn");
         assertEquals(List.of("first before", "second before", "after"), pendingTexts(convo));
         finishHeldTurn(convo);
         assertEquals(List.of(new UserRow(batch("first before", "second before", "after"), List.of())), userRows(convo));

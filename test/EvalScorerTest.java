@@ -87,7 +87,7 @@ class EvalScorerTest extends UnitTest {
                 caseWith(exactly("web_fetch", "datetime")),
                 calling("datetime", "web_fetch"));
 
-        assertTrue(failures.isEmpty(), () -> "order is not a behaviour difference: " + failures);
+        assertTrue(failures.isEmpty(), () -> "order is not a behavior difference: " + failures);
     }
 
     @Test

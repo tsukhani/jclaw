@@ -41,7 +41,7 @@ class TaskCleanupJobTest extends UnitTest {
         var agent = AgentService.create("svc-cleanup-terminal", "openrouter", "gpt-4.1");
         var oldCompleted = seedTask(agent, "old-completed", Task.Status.COMPLETED);
         var oldFailed = seedTask(agent, "old-failed", Task.Status.FAILED);
-        var oldCancelled = seedTask(agent, "old-cancelled", Task.Status.CANCELLED);
+        var oldCancelled = seedTask(agent, "old-canceled", Task.Status.CANCELLED);
         var oldLost = seedTask(agent, "old-lost", Task.Status.LOST);
 
         ConfigService.set(CONFIG_KEY, "30");

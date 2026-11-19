@@ -247,7 +247,7 @@ class BrowserScreenProxyTest extends UnitTest {
                 "another port on the permitted host is another origin");
         assertThrows(SsrfGuard.BlockedAddressException.class,
                 () -> BrowserScreenProxy.destinationsFor("127.0.0.1", 8080, "http://localhost:8080"),
-                "a permitted origin naming a host rather than an address is not honoured: what it "
+                "a permitted origin naming a host rather than an address is not honored: what it "
                         + "resolves to would go unscreened");
     }
 

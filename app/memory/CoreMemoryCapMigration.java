@@ -50,7 +50,7 @@ public final class CoreMemoryCapMigration {
             .toList();
 
     private static final String INSTRUCTIONS = """
-            You are recategorising an agent's long-term memories. Each was previously filed as
+            You are recategorizing an agent's long-term memories. Each was previously filed as
             "core" — always loaded into context — but the core tier is full, so each must move to
             the bucket that fits it best.
 
@@ -179,7 +179,7 @@ public final class CoreMemoryCapMigration {
             processed.incrementAndGet();
         }
         EventLogger.info(EVENT_CATEGORY, agent.name, null,
-                "Core-memory migration: %d kept, %d recategorised of %d over the cap"
+                "Core-memory migration: %d kept, %d recategorized of %d over the cap"
                         .formatted(cap, processed.get(), overflow.size()));
     }
 

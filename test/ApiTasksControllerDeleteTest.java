@@ -201,7 +201,7 @@ class ApiTasksControllerDeleteTest extends FunctionalTest {
         var resp = DELETE("/api/tasks/" + taskId);
         assertIsOk(resp);
         JPA.em().clear();
-        assertNull(Task.findById(taskId), "cancelled task removed by delete");
+        assertNull(Task.findById(taskId), "canceled task removed by delete");
     }
 
     @Test

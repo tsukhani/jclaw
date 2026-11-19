@@ -540,7 +540,7 @@ class AgentRunnerUsageTest extends UnitTest {
         assertTrue(new Usage(1, 2, 3, 0, 0, 0).providerMetrics().isEmpty());
         assertTrue(new Usage(1, 2, 3, 0, 0, 0, 1.5d).providerMetrics().isEmpty());
         assertTrue(new Usage(1, 2, 3, 0, 0, 0, 1.5d, null).providerMetrics().isEmpty(),
-                "an explicit null must normalise rather than propagate");
+                "an explicit null must normalize rather than propagate");
     }
 
     // --- the turn's first call (JF-151) ---

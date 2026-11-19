@@ -65,7 +65,7 @@ class MemoryClusterRecallTest extends UnitTest {
             var r = store(agent, "The user's evening routine is to lock the doors and set the alarm", 0.5);
             var d1 = store(agent, "The user wants the lights dimmed added to their evening routine", 0.5);
             var d2 = store(agent, "The user wants the kettle zebrafinch filled added to their evening routine", 0.5);
-            store(agent, "The user's favourite colour is teal", 0.5);
+            store(agent, "The user's favorite color is teal", 0.5);
             link(d1, r);
             link(d2, r);
 
@@ -274,7 +274,7 @@ class MemoryClusterRecallTest extends UnitTest {
                 assertEquals("do my morning stuff\nmorning routine", candidate.retrievalKey());
 
                 var keyedId = store.storeDeferred(String.valueOf(keyed.id), routine, "fact", 0.7, candidate.retrievalKey());
-                store.storeDeferred(String.valueOf(keyed.id), "The user's favourite colour is teal", "fact", 0.5, null);
+                store.storeDeferred(String.valueOf(keyed.id), "The user's favorite color is teal", "fact", 0.5, null);
                 var bareId = store.storeDeferred(String.valueOf(bare.id), routine, "fact", 0.7, null);
                 store.embedStored(keyedId);
                 store.embedStored(bareId);

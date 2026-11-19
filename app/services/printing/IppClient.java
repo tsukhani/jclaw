@@ -342,7 +342,7 @@ public final class IppClient {
         JOB_TEMPLATE_LABELS.put("media-type", "Paper type");
         JOB_TEMPLATE_LABELS.put("media-source", "Tray");
         JOB_TEMPLATE_LABELS.put("sides", "Sides");
-        JOB_TEMPLATE_LABELS.put("print-color-mode", "Colour");
+        JOB_TEMPLATE_LABELS.put("print-color-mode", "Color");
         JOB_TEMPLATE_LABELS.put("print-quality", "Quality");
         JOB_TEMPLATE_LABELS.put("printer-resolution", "Resolution");
         JOB_TEMPLATE_LABELS.put("orientation-requested", "Orientation");

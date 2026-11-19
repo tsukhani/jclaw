@@ -196,7 +196,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                     Design, tick Free cancellation, then open Casa Flora" works where "Find Design stays in \
                     Lisbon" can leave the search unsubmitted. Jev never sees or fills password fields, so it \
                     cannot log in: when a page needs a login, tell the operator rather than retrying. DONE is \
-                    Jev's judgement, not a check: compare the returned page with the goal. Actions: run, close.""";
+                    Jev's judgment, not a check: compare the returned page with the goal. Actions: run, close.""";
         }
         return """
                 Headless browser for JavaScript-heavy web pages. \

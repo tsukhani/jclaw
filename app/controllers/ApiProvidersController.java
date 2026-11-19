@@ -437,7 +437,7 @@ public class ApiProvidersController extends Controller {
             }
             if (substituted(model, result.servedModel())) {
                 renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, false, 0,
-                        "Provider served '%s' instead of '%s' — it ignores the requested model on this endpoint, so this selection would not be honoured"
+                        "Provider served '%s' instead of '%s' — it ignores the requested model on this endpoint, so this selection would not be honored"
                                 .formatted(result.servedModel(), model))));
             }
             // JCLAW-935: an oversized vector is discarded by LuceneIndexer.upsert with only

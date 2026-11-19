@@ -603,7 +603,7 @@ public final class JavaRuntimeService {
         } finally {
             STAGING.unlock();
         }
-        EventLogger.info(CATEGORY, "The Java runtime waiting for the next start was cancelled");
+        EventLogger.info(CATEGORY, "The Java runtime waiting for the next start was canceled");
         return true;
     }
 

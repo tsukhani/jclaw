@@ -497,7 +497,7 @@ class GraphCasesConformanceTest extends UnitTest {
     @Test
     void aNegativeThatIsAMentionOrAliasIsRefused() throws Exception {
         assertRefused(first -> first.getAsJsonArray("negatives").add("the team's deployment platform"),
-                "negative 'the team's deployment platform' is a labelled mention or alias");
+                "negative 'the team's deployment platform' is a labeled mention or alias");
     }
 
     @Test

@@ -290,7 +290,7 @@ class PrintBackendTest extends UnitTest {
         assertNull(JobAttributes.DEFAULTS.validationError());
 
         assertNotNull(new JobAttributes("duplex", null, null).validationError());
-        assertNotNull(new JobAttributes(null, "greyscale", null).validationError());
+        assertNotNull(new JobAttributes(null, "grayscale", null).validationError());
 
         // media is deliberately open: its vocabulary spans PWG size names and
         // vendor tray names, so a closed list would reject valid input.

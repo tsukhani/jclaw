@@ -928,7 +928,7 @@ class ConversationQueueTest extends UnitTest {
         assertTrue(ConversationQueue.stop(convId));
 
         var nextFlag = ConversationQueue.cancellationFlag(convId);
-        assertFalse(nextFlag.get(), "the next channel turn must not start cancelled");
+        assertFalse(nextFlag.get(), "the next channel turn must not start canceled");
         var gen = ConversationQueue.tryAcquireOwnership(convId,
                 new QueuedMessage("B", "telegram", "peer", agent), nextFlag);
         assertTrue(ConversationQueue.commitIfOwner(convId, gen, nextFlag, () -> {}), "the next turn's rows land");

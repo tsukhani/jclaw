@@ -56,7 +56,7 @@ class SubagentRegistryStateTest extends UnitTest {
     void registerMarksRunActiveAndNotCancelled() {
         var id = reg(707_1002L, new CompletableFuture<>());
         assertTrue(SubagentRegistry.isActive(id));
-        assertFalse(SubagentRegistry.isCancelled(id), "a fresh entry is not cancelled");
+        assertFalse(SubagentRegistry.isCancelled(id), "a fresh entry is not canceled");
         assertTrue(SubagentRegistry.activeRunIds().contains(id));
 
         SubagentRegistry.unregister(id);

@@ -397,7 +397,7 @@ class PricingRefreshServiceTest extends UnitTest {
         PricingRefreshService.applyCatalog(c);
 
         assertFalse(savedModel("together").get("supportsTools").getAsBoolean(),
-                "an authoritative no is not overturned by the catalogue");
+                "an authoritative no is not overturned by the catalog");
     }
 
     @Test

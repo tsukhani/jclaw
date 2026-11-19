@@ -226,7 +226,7 @@ class StreamingAgentRunnerTurnStreamTest extends UnitTest {
         var rest = new CountDownLatch(1);
         var end = new CountDownLatch(1);
         responder = holdAfterFirstToken(rest, end);
-        var convo = seedConversation("web", "web-cancelled-" + UUID.randomUUID());
+        var convo = seedConversation("web", "web-canceled-" + UUID.randomUUID());
         var sink = new ConversationTurnStreamTest.RecordingSink();
         var unsubscribe = ConversationTurnStream.subscribe(convo.id, null, sink);
         var cancelled = new AtomicBoolean();

@@ -102,7 +102,7 @@ public final class ApiErrorTemplates {
             "Length is the only rule — there are no composition requirements.";
 
     private static final String LENGTH_CAP_CHECK =
-            "The cap bounds how long each sign-in takes to check; it is not a strength judgement.";
+            "The cap bounds how long each sign-in takes to check; it is not a strength judgment.";
 
     /** A setup or reset password under the minimum, naming the minimum rather than only its existence. */
     public static ErrorTemplate passwordTooShort(int minLength) {
@@ -184,7 +184,7 @@ public final class ApiErrorTemplates {
             e(ApiResponses.PASSWORD_TOO_LONG, "That password is longer than the maximum length.",
                     LENGTH_CAP_CHECK, "Shorten it and submit again."),
             e(ApiResponses.PASSWORD_BREACHED, "That password appears in a known breach corpus.",
-                    "The check is against published breach data, not a judgement of its strength.",
+                    "The check is against published breach data, not a judgment of its strength.",
                     "Choose a different password. This one cannot be used even if retried."),
 
             // --- authorization ---

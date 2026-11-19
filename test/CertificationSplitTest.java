@@ -185,7 +185,7 @@ class CertificationSplitTest extends UnitTest {
                                 Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization")),
                         "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight",
                                 "status", "holds"))),
-                Map.of("memoryId", 12, "labelled", false, "text", "unlabelled", "entities", List.of(),
+                Map.of("memoryId", 12, "labelled", false, "text", "unlabeled", "entities", List.of(),
                         "relations", List.of()),
                 Map.of("memoryId", 13, "labelled", true, "text", "The user uses Kestrel CI.",
                         "capturedAt", "2026-10-03", "authorType", "human_turn",

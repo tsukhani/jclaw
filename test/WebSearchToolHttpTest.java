@@ -459,7 +459,7 @@ class WebSearchToolHttpTest extends UnitTest {
         assertTrue(result.contains("via Tavily"),
                 "provider attribution must reflect the fallback provider: " + result);
         assertEquals(2, server.getRequestCount(),
-                "both providers must have been dialled (first failed, second won)");
+                "both providers must have been dialed (first failed, second won)");
     }
 
     // ==================== query template / interpolation ====================

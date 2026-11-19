@@ -152,7 +152,7 @@ public final class ToolErrorTemplates {
     public static ErrorTemplate shellInterrupted(String command) {
         return new ErrorTemplate(SHELL_INTERRUPTED,
                 "Execution of `%s` was interrupted before it finished.".formatted(command),
-                "The turn was cancelled or the server is shutting down; the command's own state is unknown.",
+                "The turn was canceled or the server is shutting down; the command's own state is unknown.",
                 "Check whether the command had already taken effect before running it again.");
     }
 

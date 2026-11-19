@@ -51,7 +51,7 @@ class LlmStreamFailoverTest extends UnitTest {
 
         assertNull(accumulator.error(), "the user sees no error when a secondary is configured");
         assertEquals("from-secondary", accumulator.content());
-        assertEquals(0, server(primary).getRequestCount(), "an open primary is never dialled");
+        assertEquals(0, server(primary).getRequestCount(), "an open primary is never dialed");
         assertEquals(1, server(secondary).getRequestCount());
     }
 

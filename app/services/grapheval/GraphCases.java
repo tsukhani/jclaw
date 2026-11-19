@@ -343,7 +343,7 @@ public final class GraphCases {
             if (!e.isJsonObject()) throw new IllegalArgumentException(where + ": an entity must be an object");
             var entity = parseEntity(e.getAsJsonObject(), text, where, schema);
             if (entities.put(entity.id(), entity) != null) {
-                throw new IllegalArgumentException(where + ": entity id '" + entity.id() + "' is labelled twice");
+                throw new IllegalArgumentException(where + ": entity id '" + entity.id() + "' is labeled twice");
             }
             for (var span : spansOf(entity)) {
                 if (!spans.add(span)) throw new IllegalArgumentException(where + ": span '" + span + "' names two entities");
@@ -383,7 +383,7 @@ public final class GraphCases {
         if (object.has("negatives")) {
             for (var negative : strings(object, "negatives", where)) {
                 if (spans.contains(negative)) {
-                    throw new IllegalArgumentException(where + ": negative '" + negative + "' is a labelled mention or alias");
+                    throw new IllegalArgumentException(where + ": negative '" + negative + "' is a labeled mention or alias");
                 }
                 if (!text.contains(negative)) {
                     throw new IllegalArgumentException(where + ": negative '" + negative + "' is not verbatim in the text");

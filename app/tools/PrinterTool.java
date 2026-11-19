@@ -164,7 +164,7 @@ public class PrinterTool implements ToolRegistry.Tool {
                                         + "without one gets the job substituted or refused. "
                                         + "IPP printers only — other backends cannot carry it.")),
                         Map.entry(ARG_COLOR, prop(SchemaKeys.STRING, JobAttributes.COLOR_MODE_VALUES,
-                                "Set only when the user asks for colour or black-and-white; "
+                                "Set only when the user asks for color or black-and-white; "
                                         + "omitted means the printer's own default. IPP printers only.")),
                         Map.entry(ARG_MEDIA, prop(SchemaKeys.STRING, null,
                                 "Set only when the user names a paper size or tray. Omitting it is "

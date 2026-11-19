@@ -148,13 +148,13 @@ class TaskRunReportsTest extends UnitTest {
 
     @Test
     void aCancelledRunSaysWhoOrWhatStoppedIt() {
-        var agent = agent("cancelled");
+        var agent = agent("canceled");
         var chat = webChat(agent);
         var link = new TaskRunReports.Link(chat, true);
         var task = task(agent, "long-scan", null);
         var byOperator = run(task, link, r -> {
             r.status = TaskRun.Status.CANCELLED;
-            r.outputSummary = "Cancelled by operator";
+            r.outputSummary = "Canceled by operator";
         });
         var byTimeLimit = run(task, link, r -> {
             r.status = TaskRun.Status.CANCELLED;
@@ -165,8 +165,8 @@ class TaskRunReportsTest extends UnitTest {
         reportOnItsOwnThread(byTimeLimit, recorder);
 
         assertEquals(List.of(
-                "[task result] Task 'long-scan' (run %d) was cancelled. Cancelled by operator.%s".formatted(byOperator, DO_NOT_REPEAT),
-                "[task result] Task 'long-scan' (run %d) was cancelled. Stopped after 30 minutes, the most a fire may run.%s"
+                "[task result] Task 'long-scan' (run %d) was canceled. Canceled by operator.%s".formatted(byOperator, DO_NOT_REPEAT),
+                "[task result] Task 'long-scan' (run %d) was canceled. Stopped after 30 minutes, the most a fire may run.%s"
                         .formatted(byTimeLimit, DO_NOT_REPEAT)),
                 messages(chat).stream().map(m -> m.content).toList());
     }
@@ -318,7 +318,7 @@ class TaskRunReportsTest extends UnitTest {
             onItsOwnThread(() -> {
                 timedOutSink.onCancelled("Stopped after 30 minutes", true);
                 timedOutSink.onCancelled("Stopped after 30 minutes", true);
-                shutDownSink.onCancelled("Cancelled by operator", false);
+                shutDownSink.onCancelled("Canceled by operator", false);
                 return null;
             });
 

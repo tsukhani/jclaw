@@ -115,7 +115,7 @@ class VoiceControllerTest extends UnitTest {
         var stillThere = ConversationService.findById(webId);
         assertNotNull(stillThere, "the web conversation must survive a voice session");
         assertEquals("web", stillThere.channelType,
-                "the web conversation must not be re-channelled by voice");
+                "the web conversation must not be re-channeled by voice");
         assertEquals(1L, Conversation.count("agent = ?1 and channelType = ?2", agent, "web"),
                 "voice must not create or replace web conversations");
     }

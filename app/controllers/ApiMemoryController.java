@@ -635,7 +635,7 @@ public class ApiMemoryController extends Controller {
      * cap, or another agent's migration holds the single-flight slot.
      */
     @ApiResponse(responseCode = "200")
-    @Operation(summary = "Recategorise one agent's core memories past the cap")
+    @Operation(summary = "Recategorize one agent's core memories past the cap")
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "rewrites any agent's core memories -- the cross-agent reach /api/memories is floored for")
     public static void coreMigrationStart(Long agentId) {

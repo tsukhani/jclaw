@@ -106,7 +106,7 @@ class WebScrapeConcurrencyTest extends UnitTest {
         scrape("{\"url\":\"" + SEED + "\",\"maxDepth\":1}");
 
         assertEquals(1, routes.maxInFlight.get(),
-                "an operator setting 1 must get the old sequential behaviour");
+                "an operator setting 1 must get the old sequential behavior");
     }
 
     @Test

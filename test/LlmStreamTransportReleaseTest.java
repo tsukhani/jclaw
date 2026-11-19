@@ -90,7 +90,7 @@ class LlmStreamTransportReleaseTest extends UnitTest {
         thread.interrupt();
 
         assertTrue(stream.returned.await(10, TimeUnit.SECONDS));
-        assertTrue(server.awaitHangup(10), "the interrupt path cancels, and cancelling hangs up");
+        assertTrue(server.awaitHangup(10), "the interrupt path cancels, and canceling hangs up");
         assertTrue(stream.interruptedOnReturn.get(),
                 "the flag is restored for whoever called in, which only this path does");
         // Which of the two reports lands is a race the interrupt path has always had: the cancel

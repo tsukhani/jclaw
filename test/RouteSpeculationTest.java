@@ -249,7 +249,7 @@ class RouteSpeculationTest extends UnitTest {
         var discarded = usage.getAsJsonObject("discarded");
         assertEquals(previous.name, discarded.get("provider").getAsString());
         assertEquals(MODEL, discarded.get("model").getAsString());
-        assertEquals("jtokkit", discarded.get("usageSource").getAsString(), "a cancelled call reports no usage of its own");
+        assertEquals("jtokkit", discarded.get("usageSource").getAsString(), "a canceled call reports no usage of its own");
         assertTrue(discarded.get("prompt").getAsInt() > 0, discarded.toString());
         assertEquals(TokenUsageEstimator.estimateCompletion(MODEL, "speculative text", List.of(), "").tokens(),
                 discarded.get("completion").getAsInt(), "the text the discarded call had streamed");

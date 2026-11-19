@@ -56,9 +56,9 @@ class LlmAudioAndEvalsGateTest extends UnitTest {
 
         assertNotNull(prepared);
         assertEquals("x", new String(Base64.getDecoder().decode(prepared.base64())),
-                "an unrecognised type must not cost the audio");
+                "an unrecognized type must not cost the audio");
         assertTrue(prepared.format().isBlank(),
-                "documenting today's behaviour: no format is inferred, rather than a default");
+                "documenting today's behavior: no format is inferred, rather than a default");
     }
 
     @Test
@@ -71,7 +71,7 @@ class LlmAudioAndEvalsGateTest extends UnitTest {
 
         assertEquals("x", new String(Base64.getDecoder().decode(prepared.base64())));
         assertTrue(prepared.format().isBlank(),
-                "documenting today's behaviour: a null MIME yields no format token");
+                "documenting today's behavior: a null MIME yields no format token");
     }
 
     @Test

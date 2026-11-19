@@ -109,7 +109,7 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
 
         assertEquals(1, cands.size(), "the memory is still captured — only its category changes");
         assertEquals(memory.MemoryCategory.FACT.label, cands.getFirst().category(),
-                "a capture labelled core must be demoted, never stored as core");
+                "a capture labeled core must be demoted, never stored as core");
     }
 
     @Test
@@ -246,7 +246,7 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
 
         assertEquals(1, got.size());
         assertEquals(MemoryCategory.FACT.label, got.getFirst().category(),
-                "an unrecognised label must not reach the database");
+                "an unrecognized label must not reach the database");
         assertEquals(0.7, got.getFirst().importance(), 1e-9,
                 "coercing the label must not disturb an explicit importance");
     }

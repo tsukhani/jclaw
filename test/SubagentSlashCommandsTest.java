@@ -258,7 +258,7 @@ class SubagentSlashCommandsTest extends UnitTest {
         // Future was cancelled (so awaiting callers unblock with
         // CancellationException instead of waiting to the full timeout).
         assertTrue(fut.isCancelled(),
-                "registered Future must be cancelled after kill");
+                "registered Future must be canceled after kill");
 
         // JCLAW-291: entry stays in the active map after kill — the running
         // VT's finally block (unregister) is the canonical cleanup path.

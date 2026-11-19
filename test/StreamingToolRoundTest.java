@@ -179,7 +179,7 @@ class StreamingToolRoundTest extends UnitTest {
         var result = (String) cancelledReturnMethod().invoke(null,
                 "", List.of(), "web", cb, agent, 0);
 
-        assertTrue(result.contains("Synthesis was cancelled"),
+        assertTrue(result.contains("Synthesis was canceled"),
                 "fallback message must be returned, got: " + result);
         assertEquals(result, emitted.get(),
                 "fallback must also be pushed via onToken so streamContent has it");
@@ -197,8 +197,8 @@ class StreamingToolRoundTest extends UnitTest {
         var blankResult = (String) cancelledReturnMethod().invoke(null,
                 "   \n\t  ", List.of(), "web", recordingCallbacks(emitted2), agent, 0);
 
-        assertTrue(nullResult.contains("Synthesis was cancelled"));
-        assertTrue(blankResult.contains("Synthesis was cancelled"));
+        assertTrue(nullResult.contains("Synthesis was canceled"));
+        assertTrue(blankResult.contains("Synthesis was canceled"));
         assertNotNull(emitted1.get());
         assertNotNull(emitted2.get());
     }
@@ -220,7 +220,7 @@ class StreamingToolRoundTest extends UnitTest {
 
         assertTrue(result.startsWith("![screenshot](attachments/abc123.png)"),
                 "collected images must prefix the fallback, got: " + result);
-        assertTrue(result.contains("Synthesis was cancelled"),
+        assertTrue(result.contains("Synthesis was canceled"),
                 "fallback message must still be present alongside images");
     }
 }

@@ -187,8 +187,8 @@ class TelegramModelSelectorTest extends UnitTest {
         assertTrue(editBody.contains("Select a provider"), "prompt: " + editBody);
         // Display labels — registry IDs ("openrouter", "ollama-cloud") map to
         // human-readable names ("OpenRouter", "Ollama Cloud") on the buttons.
-        assertTrue(editBody.contains("OpenRouter"), "openrouter labelled: " + editBody);
-        assertTrue(editBody.contains("Ollama Cloud"), "ollama-cloud labelled: " + editBody);
+        assertTrue(editBody.contains("OpenRouter"), "openrouter labeled: " + editBody);
+        assertTrue(editBody.contains("Ollama Cloud"), "ollama-cloud labeled: " + editBody);
     }
 
     @Test
@@ -321,7 +321,7 @@ class TelegramModelSelectorTest extends UnitTest {
         assertEquals(1, server.countRequests("answerCallbackQuery"),
                 "must ack the callback");
         var body = firstRequestBody("editMessageText");
-        assertTrue(body.contains("Cancelled"), "cancellation text: " + body);
+        assertTrue(body.contains("Canceled"), "cancellation text: " + body);
         // No keyboard on the edit — the bubble becomes a plain note.
         assertFalse(body.contains("reply_markup"),
                 "keyboard should be cleared on cancel: " + body);

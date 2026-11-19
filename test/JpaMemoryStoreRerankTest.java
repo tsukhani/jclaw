@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 class JpaMemoryStoreRerankTest extends UnitTest {
 
     private static final String BERLIN = "The user lives in Berlin and enjoys hiking";
-    private static final String VIM = "Favourite editor is Vim with a dark theme";
+    private static final String VIM = "Favorite editor is Vim with a dark theme";
     private static final String FINANCE = "Quarterly finance report is due in October";
     /** Zero lexical overlap with any memory — recall is KNN-leg-only. */
     private static final String QUERY = "zebra quix flurble";

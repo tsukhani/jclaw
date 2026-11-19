@@ -36,7 +36,7 @@ class TaskRunRegistryTest extends UnitTest {
     void registerThenFlagThenUnregister() {
         try {
             TaskRunRegistry.register(ID);
-            assertFalse(TaskRunRegistry.isCancelled(ID), "fresh registration is not cancelled");
+            assertFalse(TaskRunRegistry.isCancelled(ID), "fresh registration is not canceled");
             assertTrue(TaskRunRegistry.activeRunIds().contains(ID), "registered id is active");
 
             assertTrue(TaskRunRegistry.requestCancel(ID), "requestCancel flips a registered entry");
@@ -44,7 +44,7 @@ class TaskRunRegistryTest extends UnitTest {
         } finally {
             TaskRunRegistry.unregister(ID);
         }
-        assertFalse(TaskRunRegistry.isCancelled(ID), "unregistered id is not cancelled");
+        assertFalse(TaskRunRegistry.isCancelled(ID), "unregistered id is not canceled");
         assertFalse(TaskRunRegistry.activeRunIds().contains(ID), "unregistered id is gone");
     }
 
@@ -52,7 +52,7 @@ class TaskRunRegistryTest extends UnitTest {
     void requestCancelOnUnregisteredReturnsFalse() {
         // OTHER was never registered.
         assertFalse(TaskRunRegistry.requestCancel(OTHER), "no entry → nothing to flip");
-        assertFalse(TaskRunRegistry.isCancelled(OTHER), "no entry → not cancelled");
+        assertFalse(TaskRunRegistry.isCancelled(OTHER), "no entry → not canceled");
     }
 
     @Test
@@ -78,7 +78,7 @@ class TaskRunRegistryTest extends UnitTest {
             var ex = assertThrows(RunCancelledException.class,
                     () -> AgentRunner.checkTaskRunCancel(ID),
                     "a flagged run trips the checkpoint");
-            assertEquals(ID, ex.runId(), "the exception carries the cancelled run id");
+            assertEquals(ID, ex.runId(), "the exception carries the canceled run id");
         } finally {
             TaskRunRegistry.unregister(ID);
         }

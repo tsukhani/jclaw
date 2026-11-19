@@ -425,7 +425,7 @@ class JevLoopTest extends UnitTest {
         assertTrue(result.startsWith("Jev run: done after 1 decision.\nFinal page: Stays — https://stays.example/\n"
                 + "7 controls on the final page were not offered to Jev, which is shown at most 250.\n"
                 + "No actions executed.\n"), result);
-        assertTrue(result.contains("DONE and BLOCKED are Jev's judgement, not a verified result"), result);
+        assertTrue(result.contains("DONE and BLOCKED are Jev's judgment, not a verified result"), result);
         assertTrue(result.contains("\nVisible text:\nFind a stay\n"), result);
         assertTrue(result.endsWith("\n[Truncated]"), result);
     }

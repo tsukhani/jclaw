@@ -347,11 +347,11 @@ class PrintRenderingTest extends UnitTest {
 
         assertEquals("image/pwg-raster", gray.format());
         assertTrue(gray.explanation().contains("600 DPI"), gray.explanation());
-        assertTrue(gray.explanation().contains("greyscale"), gray.explanation());
+        assertTrue(gray.explanation().contains("grayscale"), gray.explanation());
         // Asking for colour must actually get colour, not be silently overridden.
-        assertTrue(color.explanation().contains("colour"), color.explanation());
+        assertTrue(color.explanation().contains("color"), color.explanation());
         assertTrue(gray.document().length < color.document().length,
-                "greyscale should be smaller: %d vs %d"
+                "grayscale should be smaller: %d vs %d"
                         .formatted(gray.document().length, color.document().length));
     }
 

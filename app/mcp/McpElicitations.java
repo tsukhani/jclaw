@@ -251,7 +251,7 @@ public final class McpElicitations {
         var message = messageOf(form);
         var unanswered = "JClaw: the operator did not answer the request for input from MCP server '%s' within %s."
                 .formatted(server, spoken(wait.length));
-        var stopped = ("JClaw: the turn ended (Stop, or the chat closed), which cancelled the request for input from"
+        var stopped = ("JClaw: the turn ended (Stop, or the chat closed), which canceled the request for input from"
                 + " MCP server '%s'.").formatted(server);
         var turnCancel = ToolContext.turnCancel();
         if (ToolContext.cancelled() || (turnCancel != null && turnCancel.get())) {
@@ -346,12 +346,12 @@ public final class McpElicitations {
             case DECLINE -> new Answer(response,
                     "JClaw: the operator declined the request for input from MCP server '%s'.".formatted(server));
             default -> new Answer(response,
-                    "JClaw: the operator cancelled the request for input from MCP server '%s'.".formatted(server));
+                    "JClaw: the operator canceled the request for input from MCP server '%s'.".formatted(server));
         };
         var why = switch (action) {
             case ACCEPT -> "the operator submitted the form";
             case DECLINE -> "the operator declined";
-            default -> "the operator cancelled";
+            default -> "the operator canceled";
         };
         return close(id, answer, why) ? new Outcome.Answered(action) : new Outcome.NotPending();
     }

@@ -267,13 +267,13 @@ public class ApiTaskRunsController extends Controller {
         run.durationMs = run.startedAt != null
                 ? Duration.between(run.startedAt, run.completedAt).toMillis() : null;
         run.status = TaskRun.Status.CANCELLED;
-        run.outputSummary = "Cancelled by operator";
+        run.outputSummary = "Canceled by operator";
         run.save();
         TaskLifecycleEvents.publishRunCancelled(run.task.id, run.id);
 
         EventLogger.info("TASK_MGMT_RUN_CANCEL",
                 run.task != null && run.task.agent != null ? run.task.agent.name : null, null,
-                "Task run id %d cancelled by operator".formatted(runId));
+                "Task run id %d canceled by operator".formatted(runId));
 
         renderJSON(gson.toJson(TaskRunView.of(run)));
     }

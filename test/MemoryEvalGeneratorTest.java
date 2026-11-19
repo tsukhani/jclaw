@@ -119,7 +119,7 @@ class MemoryEvalGeneratorTest extends UnitTest {
 
     @Test
     void aBlankOrMultiLineQuestionIsDroppedRatherThanStored() {
-        seed("The user's favourite tea is genmaicha");
+        seed("The user's favorite tea is genmaicha");
         seed("The user keeps bees");
         assertTrue(MemoryEvalGenerator.generate(agent, "s1", 10,
                 writerReturning("   ", new ArrayList<>())).cases().isEmpty(),

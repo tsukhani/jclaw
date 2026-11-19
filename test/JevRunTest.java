@@ -323,7 +323,7 @@ class JevRunTest extends UnitTest {
         assertTrue(result.contains("1. TYPE_TEXT Destination ← \"Lisbon\""), result);
         assertTrue(result.contains("2. CLICK Find stays"), result);
         assertTrue(result.contains("3. SELECT Stay category → Design"), result);
-        assertTrue(result.contains("Jev's judgement"), result);
+        assertTrue(result.contains("Jev's judgment"), result);
         assertTrue(result.contains("Visible text:\n"), result);
         assertTrue(result.contains("Stays in Lisbon"), result);
     }
@@ -494,7 +494,7 @@ class JevRunTest extends UnitTest {
         for (var a : state.getAsJsonArray("actions")) {
             if (a.getAsJsonObject().get("label").getAsString().equals(label)) return a.getAsJsonObject();
         }
-        throw new AssertionError("no action labelled " + label);
+        throw new AssertionError("no action labeled " + label);
     }
 
     // --- the text helper's model (no browser) -------------------------------------------------

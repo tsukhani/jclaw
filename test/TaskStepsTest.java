@@ -21,8 +21,8 @@ class TaskStepsTest extends UnitTest {
 
     @Test
     void jsonArrayParsesToOrderedSteps() {
-        var steps = TaskSteps.parse("[\"Fetch orders\",\"Summarise\",\"Post to Slack\"]");
-        assertEquals(List.of("Fetch orders", "Summarise", "Post to Slack"), steps);
+        var steps = TaskSteps.parse("[\"Fetch orders\",\"Summarize\",\"Post to Slack\"]");
+        assertEquals(List.of("Fetch orders", "Summarize", "Post to Slack"), steps);
     }
 
     @Test
@@ -68,8 +68,8 @@ class TaskStepsTest extends UnitTest {
 
     @Test
     void flattenMultiStepIsNumberedList() {
-        var flat = TaskSteps.flattenForPrompt("[\"Fetch orders\",\"Summarise\",\"Post to Slack\"]");
-        assertEquals("1. Fetch orders\n2. Summarise\n3. Post to Slack", flat);
+        var flat = TaskSteps.flattenForPrompt("[\"Fetch orders\",\"Summarize\",\"Post to Slack\"]");
+        assertEquals("1. Fetch orders\n2. Summarize\n3. Post to Slack", flat);
     }
 
     @Test

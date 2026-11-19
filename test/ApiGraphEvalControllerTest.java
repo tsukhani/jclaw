@@ -277,7 +277,7 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
             var sheet = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
             var declared = GraphCases.userMd(Files.readString(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH)));
             assertEquals(declared, sheet.has("userMd") ? sheet.get("userMd").getAsString() : null,
-                    "the labeller is told who the owner is");
+                    "the labeler is told who the owner is");
             assertEquals(GraphCases.capturedAt(Files.readString(Play.applicationPath.toPath()
                     .resolve(GraphCases.DEFAULT_PATH))).toString(), sheet.get("capturedAt").getAsString());
             var ids = new HashSet<String>();

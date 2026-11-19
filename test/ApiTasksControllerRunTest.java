@@ -262,7 +262,7 @@ class ApiTasksControllerRunTest extends FunctionalTest {
     @Test
     void runCancelledTaskRevivesToPending() {
         var agent = seedAgent();
-        var taskId = seedTask(agent, "cancelled-run", "every 1h");
+        var taskId = seedTask(agent, "canceled-run", "every 1h");
 
         // Cancel via API to set up the CANCELLED state.
         assertIsOk(POST("/api/tasks/" + taskId + "/cancel", "application/json", ""));

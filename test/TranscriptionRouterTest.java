@@ -53,7 +53,7 @@ class TranscriptionRouterTest extends UnitTest {
         // up the calling pipeline.
         ConfigService.set(KEY, "vosk-magical");
         assertTrue(TranscriptionRouter.configuredService().isEmpty(),
-                "unrecognised provider must not throw");
+                "unrecognized provider must not throw");
     }
 
     @Test

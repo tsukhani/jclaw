@@ -77,7 +77,7 @@ class PagedJpqlQueryTest extends UnitTest {
                 .page(0, 50)
                 .execute();
 
-        assertEquals(2L, page.total(), "COUNT honours the same WHERE + param as the SELECT");
+        assertEquals(2L, page.total(), "COUNT honors the same WHERE + param as the SELECT");
         assertEquals(2, page.rows().size(), "SELECT returns exactly the matching rows");
     }
 

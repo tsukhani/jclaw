@@ -196,7 +196,7 @@ public final class TaskRunReports {
         return switch (run.status) {
             case COMPLETED -> "Task '%s' (run %d) completed in %s.".formatted(name, run.id, seconds(run.durationMs));
             case FAILED -> "Task '%s' (run %d) failed.".formatted(name, run.id);
-            case CANCELLED -> "Task '%s' (run %d) was cancelled.".formatted(name, run.id);
+            case CANCELLED -> "Task '%s' (run %d) was canceled.".formatted(name, run.id);
             case RUNNING -> "Task '%s' (run %d) has not finished.".formatted(name, run.id);
         };
     }

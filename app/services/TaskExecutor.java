@@ -386,7 +386,7 @@ public final class TaskExecutor {
             boolean timedOut = timeoutNote != null;
             if (!timedOut && EventLogger.isShuttingDown()) return leaveForNextBoot(task, sink, "a shutdown's cancel");
             // The operator's cancel endpoint announces its own cancel.
-            sink.onCancelled(timeoutNote != null ? timeoutNote : "Cancelled by operator", timedOut);
+            sink.onCancelled(timeoutNote != null ? timeoutNote : "Canceled by operator", timedOut);
             // The fire ended without completing; return the task from RUNNING to
             // its alive state (ACTIVE for recurring, PENDING for one-shot) so it
             // isn't stranded showing RUNNING. Only this fire was canceled — the
@@ -394,8 +394,8 @@ public final class TaskExecutor {
             leaveRunning(task.id, Task.initialStatusFor(task.type));
             EventLogger.info("task", null, null,
                     "TaskExecutor.runTask: task run %d %s".formatted(sink.taskRunId(),
-                            timedOut ? "cancelled by its deadline: " + timeoutNote
-                                    : "cancelled by operator"));
+                            timedOut ? "canceled by its deadline: " + timeoutNote
+                                    : "canceled by operator"));
             return false;
         } catch (RuntimeException e) {
             // An interrupted model or tool call reads as transient, so rethrowing would retry the whole fire.

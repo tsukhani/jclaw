@@ -88,9 +88,9 @@ public final class TaskFireDeadline {
         try {
             if (TIMED_OUT.containsKey(taskRunId)) return;
             if (ceiling.isPositive() && System.nanoTime() - startNanos >= ceiling.toNanos()) {
-                fire(taskRunId, "Cancelled: exceeded max run duration of %d seconds".formatted(ceiling.toSeconds()));
+                fire(taskRunId, "Canceled: exceeded max run duration of %d seconds".formatted(ceiling.toSeconds()));
             } else if (idle.isPositive() && idleNanos(taskRunId, idle) >= idle.toNanos()) {
-                fire(taskRunId, "Cancelled: no activity for %d seconds".formatted(idle.toSeconds()));
+                fire(taskRunId, "Canceled: no activity for %d seconds".formatted(idle.toSeconds()));
             }
         } catch (RuntimeException e) {
             EventLogger.warn("task", null, null,

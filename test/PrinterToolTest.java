@@ -150,7 +150,7 @@ class PrinterToolTest extends UnitTest {
         // Map.of caps at ten pairs and this set is eleven — a regression to Map.of
         // would not compile, but a dropped property would compile fine.
         assertTrue(properties.containsKey("sides"), "duplex control missing");
-        assertTrue(properties.containsKey("color"), "colour control missing");
+        assertTrue(properties.containsKey("color"), "color control missing");
         assertTrue(properties.containsKey("media"), "tray/paper control missing");
 
         @SuppressWarnings("unchecked")

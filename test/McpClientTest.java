@@ -837,7 +837,7 @@ class McpClientTest extends UnitTest {
                 McpElicitations.resolve(awaitQuestion(web, "Your email?").id(), action, null);
                 var got = result.get(10, TimeUnit.SECONDS);
                 assertEquals("{\"email\":{\"action\":\"" + action + "\"}}", got.content(), action);
-                assertEquals("JClaw: the operator " + (action.equals("decline") ? "declined" : "cancelled")
+                assertEquals("JClaw: the operator " + (action.equals("decline") ? "declined" : "canceled")
                         + " the request for input from MCP server 'fake'.", got.note(), action);
                 assertEquals(2, calls(transports.getFirst()).size(), "the answer went back as given");
             }
@@ -1228,7 +1228,7 @@ class McpClientTest extends UnitTest {
             assertEquals(List.of(t.requests.getLast().id()), t.cancelled);
             assertEquals(McpClient.State.READY, client.state());
             assertFalse(client.callTool("fast", new JsonObject()).isError());
-            assertEquals(1, t.cancelled.size(), "an answered call is never cancelled");
+            assertEquals(1, t.cancelled.size(), "an answered call is never canceled");
         }
     }
 

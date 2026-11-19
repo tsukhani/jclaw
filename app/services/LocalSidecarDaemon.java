@@ -297,7 +297,7 @@ public final class LocalSidecarDaemon {
             if (stopGeneration != genAtLaunch) {
                 proc.destroyForcibly();
                 throw new StartCancelledException(
-                        "%s start was cancelled by a concurrent stop".formatted(cfg.displayName()));
+                        "%s start was canceled by a concurrent stop".formatted(cfg.displayName()));
             }
             process = proc;
             // The sidecar writes operational lines (listening, request logs, idle-exit)
@@ -324,7 +324,7 @@ public final class LocalSidecarDaemon {
         while (System.nanoTime() < deadline) {
             if (stopGeneration != genAtStart) {
                 throw cfg.fail().apply(
-                        "%s startup was cancelled by a concurrent stop".formatted(cfg.displayName()), null);
+                        "%s startup was canceled by a concurrent stop".formatted(cfg.displayName()), null);
             }
             Process p = process; // volatile snapshot — stop() may null it under us
             if (p != null && !p.isAlive()) {

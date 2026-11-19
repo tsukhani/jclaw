@@ -621,7 +621,7 @@ public class ApiTasksController extends Controller {
         TaskSchedulingService.cancel(task.id);
         EventLogger.info("TASK_MGMT_DELETE",
                 task.agent != null ? task.agent.name : null, null,
-                "Task '%s' (id=%d) cancelled via API".formatted(task.name, task.id));
+                "Task '%s' (id=%d) canceled via API".formatted(task.name, task.id));
         renderJSON(gson.toJson(TaskView.of(task)));
     }
 

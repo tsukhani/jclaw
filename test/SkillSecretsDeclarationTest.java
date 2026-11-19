@@ -191,8 +191,8 @@ class SkillSecretsDeclarationTest extends UnitTest {
     void aSettingLineWhoseNameReadsAsACredentialDeclaresASecret() {
         var skillMd = """
                 ```secrets
-                setting NAS_PASS=nas.example.com:5001        # The password, mislabelled
-                setting SONARR_API_KEY=sonarr.example.com    # The key, mislabelled
+                setting NAS_PASS=nas.example.com:5001        # The password, mislabeled
+                setting SONARR_API_KEY=sonarr.example.com    # The key, mislabeled
                 setting JIRA_PERSONAL_TOKEN=jira.example.com
                 setting SITE_SESSION_ID=x
                 setting TRAKT_CLIENT_ID=0123abcd              # An app id, a setting

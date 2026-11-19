@@ -1331,7 +1331,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                 var answered = answer(id, "{\"action\":\"" + action + "\"}");
                 assertEquals("{\"status\":\"ok\",\"action\":\"" + action + "\"}", getContent(answered));
                 assertEquals("{\"email\":{\"action\":\"" + action + "\"}}\n\nJClaw: the operator "
-                        + (action.equals("decline") ? "declined" : "cancelled") + " the request for input from MCP server '"
+                        + (action.equals("decline") ? "declined" : "canceled") + " the request for input from MCP server '"
                         + server + "'.", result.get(10, java.util.concurrent.TimeUnit.SECONDS),
                         "the server's result, then JClaw's line, so the agent does not ask again");
                 assertEquals(2, calls.size(), "the operator's answer went back as given");
@@ -1431,7 +1431,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
             assertEquals("action", body(refused).get("field").getAsString());
             assertFalse(result.isDone());
             answer(id, "{\"action\":\"cancel\"}");
-            assertEquals("{\"email\":{\"action\":\"cancel\"}}\n\nJClaw: the operator cancelled the request for input from"
+            assertEquals("{\"email\":{\"action\":\"cancel\"}}\n\nJClaw: the operator canceled the request for input from"
                     + " MCP server '" + server + "'.", result.get(10, java.util.concurrent.TimeUnit.SECONDS));
         });
     }

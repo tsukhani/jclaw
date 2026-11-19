@@ -139,7 +139,7 @@ class TranscriptionPipelineTest extends UnitTest {
         var chatMsg = VisionAudioAssembler.userMessageFor(fresh);
         var parts = (List<?>) chatMsg.content();
         assertNotNull(firstPartOfType(parts, "input_audio"),
-                "default overload must preserve input_audio behaviour");
+                "default overload must preserve input_audio behavior");
     }
 
     // ── isAudioFormatRejection heuristic ─────────────────────────────

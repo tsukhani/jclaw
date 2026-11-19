@@ -87,7 +87,7 @@ class TaskFireFunctionalTest extends UnitTest {
 
         var agent = createAgent("functional-fire-agent", "test-provider", "test-model");
         var task = persistTask(agent, "Daily summary",
-                "Summarise yesterday's activity.", Task.Type.IMMEDIATE);
+                "Summarize yesterday's activity.", Task.Type.IMMEDIATE);
 
         // Commit so the inner Tx blocks (TaskExecutor, sinks, runForTask)
         // running on a virtual thread see the persisted rows.
@@ -156,7 +156,7 @@ class TaskFireFunctionalTest extends UnitTest {
         var msgs = loadMessages(runId);
         assertEquals(2, msgs.size(), "user + assistant turns persisted");
         assertEquals(MessageRole.USER, msgs.get(0).role);
-        assertEquals("Summarise yesterday's activity.", msgs.get(0).content);
+        assertEquals("Summarize yesterday's activity.", msgs.get(0).content);
         assertEquals(MessageRole.ASSISTANT, msgs.get(1).role);
         assertEquals("Daily summary: nothing happened yesterday.", msgs.get(1).content);
     }
@@ -202,7 +202,7 @@ class TaskFireFunctionalTest extends UnitTest {
     void cancelledTaskIsSkippedWithoutOpeningARun() throws Exception {
         // No LLM server needed — handler short-circuits before runForTask.
         var agent = createAgent("fire-cancel-test-agent", "test-provider", "test-model");
-        var task = persistTask(agent, "Was cancelled",
+        var task = persistTask(agent, "Was canceled",
                 "Should not run.", Task.Type.IMMEDIATE);
         task.status = Task.Status.CANCELLED;
         task.save();
@@ -419,7 +419,7 @@ class TaskFireFunctionalTest extends UnitTest {
         startLlmServer(simpleResponse("done"));
         configureProvider();
         var agent = createAgent("regular-task-agent", "test-provider", "test-model");
-        var task = persistTask(agent, "Month-end report", "Summarise.", Task.Type.SCHEDULED);
+        var task = persistTask(agent, "Month-end report", "Summarize.", Task.Type.SCHEDULED);
         task.scheduledAt = Instant.now();
         task.autoDeleteOnComplete = true;   // set, but payloadType is null -> not a reminder
         task.save();

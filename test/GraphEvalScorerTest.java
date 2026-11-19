@@ -320,7 +320,7 @@ class GraphEvalScorerTest extends UnitTest {
         var c = works(GraphCases.HOLDS, null, "The user works at Harborlight Analytics.");
         var s = score(c, ALL, worksAt(status("The user", "Harborlight Analytics", ExtractionPipeline.UNSTATED)))
                 .point();
-        assertEquals(1, s.written(), "only the organisation");
+        assertEquals(1, s.written(), "only the organization");
         assertEquals(1, s.vetoed());
         assertEquals(0.5, s.recall());
     }
@@ -383,7 +383,7 @@ class GraphEvalScorerTest extends UnitTest {
                 negation("The user", "works_at", "Harborlight Analytics")};
         var right = score(works(GraphCases.DENIED, null, text), ALL, decisions).point();
         assertEquals(new GraphEvalScorer.ClassTally(1, 1, 0, 1, 1.0), right.negation());
-        assertEquals(2, right.gWritten(), "the organisation and the denial");
+        assertEquals(2, right.gWritten(), "the organization and the denial");
         assertEquals(0, right.trapViolations());
 
         var wrong = score(works(GraphCases.HOLDS, null, text), ALL, decisions);

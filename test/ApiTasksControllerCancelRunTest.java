@@ -182,6 +182,6 @@ class ApiTasksControllerCancelRunTest extends FunctionalTest {
         // After cancel the run is terminal, so the task no longer advertises it.
         var after = getContent(GET("/api/tasks"));
         assertFalse(after.contains("\"runningRunId\":" + runId),
-                "list drops the running run id once cancelled: " + after);
+                "list drops the running run id once canceled: " + after);
     }
 }

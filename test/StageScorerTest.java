@@ -99,7 +99,7 @@ class StageScorerTest extends UnitTest {
         assertEquals(1.0, s.rejection().rate());
         assertEquals(1, s.relation().hit(), "the reversed uses is wrong");
         assertEquals(2, s.relation().total());
-        assertEquals(1, s.noRelation().hit(), "an unlabelled pair kept below one half");
+        assertEquals(1, s.noRelation().hit(), "an unlabeled pair kept below one half");
         assertEquals(1, s.noRelation().total());
         assertEquals(0, s.failures());
     }

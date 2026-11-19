@@ -206,7 +206,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 "Stay on the starting URL's host (default true)"),
                         ARG_RESPECT_ROBOTS, Map.of(SchemaKeys.TYPE, "boolean",
                                 SchemaKeys.DESCRIPTION,
-                                "Honour the site's robots.txt (default true). Set false ONLY when "
+                                "Honor the site's robots.txt (default true). Set false ONLY when "
                                 + "the user explicitly asks to ignore robots.txt for this request; "
                                 + "never choose it yourself to work around a refusal."),
                         ARG_SAVE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,

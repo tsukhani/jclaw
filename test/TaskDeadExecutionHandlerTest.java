@@ -130,7 +130,7 @@ class TaskDeadExecutionHandlerTest extends UnitTest {
 
     @Test
     void aCancelledRecurringTaskIsRemoved() {
-        var task = recurring("jf355-cancelled", Task.Status.CANCELLED, Instant.now());
+        var task = recurring("jf355-canceled", Task.Status.CANCELLED, Instant.now());
 
         assertEquals(new Decision.Stop(), TaskDeadExecutionHandler.decide(task.id, false));
         assertEquals(Task.Status.CANCELLED, ((Task) Task.findById(task.id)).status);

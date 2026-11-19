@@ -156,7 +156,7 @@ class TaskExecutorTest extends UnitTest {
 
         var agent = createAgent("task-agent", "test-provider", "test-model");
         var task = persistTask(agent, "Daily summary",
-                "Summarise yesterday's activity and report.", Task.Type.IMMEDIATE);
+                "Summarize yesterday's activity and report.", Task.Type.IMMEDIATE);
 
         // Commit so the virtual thread inside runTask sees the rows.
         JPA.em().getTransaction().commit();
@@ -182,7 +182,7 @@ class TaskExecutorTest extends UnitTest {
         var user = rows.get(0);
         assertEquals(MessageRole.USER, user.role);
         assertEquals(0, user.turnIndex);
-        assertEquals("Summarise yesterday's activity and report.", user.content);
+        assertEquals("Summarize yesterday's activity and report.", user.content);
 
         var assistant = rows.get(1);
         assertEquals(MessageRole.ASSISTANT, assistant.role);
@@ -274,7 +274,7 @@ class TaskExecutorTest extends UnitTest {
         // raced the fire (-> CANCELLED) must not be dragged back out by a late
         // success/cancel restore. A genuinely RUNNING task does flip.
         var agent = createAgent("guard-agent", "p", "m");
-        var cancelled = persistTask(agent, "cancelled-task", "x", Task.Type.IMMEDIATE);
+        var cancelled = persistTask(agent, "canceled-task", "x", Task.Type.IMMEDIATE);
         var running = persistTask(agent, "running-task", "x", Task.Type.IMMEDIATE);
         cancelled.status = Task.Status.CANCELLED;
         cancelled.save();

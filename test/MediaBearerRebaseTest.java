@@ -202,7 +202,7 @@ class MediaBearerRebaseTest extends UnitTest {
                 "exactly one message must carry the caption block, got " + captioned + " in " + messages);
         int slot = captioned.getFirst();
         assertTrue(messages.get(slot).contains("MARK-U4"),
-                "the caption must ride the turn that carries the image, not a neighbour: " + messages.get(slot));
+                "the caption must ride the turn that carries the image, not a neighbor: " + messages.get(slot));
         assertTrue(slot + 1 < messages.size() && messages.get(slot + 1).contains("\"assistant\"")
                         && messages.get(slot + 1).contains("MARK-A4"),
                 "the image turn must still be followed by its own assistant reply: " + messages);

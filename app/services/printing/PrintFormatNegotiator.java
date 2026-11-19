@@ -127,7 +127,7 @@ public final class PrintFormatNegotiator {
             var encoded = PwgRasterEncoder.encode(pages, page.dpi(), media, duplex, tumble, gray);
             return new Prepared(encoded, PWG_RASTER, true,
                     "rendered %d page(s) to PWG raster at %d DPI %s on %s because the printer does not accept %s"
-                            .formatted(pages.size(), page.dpi(), gray ? "greyscale" : "colour",
+                            .formatted(pages.size(), page.dpi(), gray ? "grayscale" : "color",
                                     media == null ? "the default media" : media, describe(sourceFormat)),
                     media);
         }

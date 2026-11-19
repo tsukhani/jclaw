@@ -87,7 +87,7 @@ class HeldOutTest extends UnitTest {
 
     @Test
     void anExistingFileIsNeverOverwritten() throws Exception {
-        var file = dir.resolve("labelled.json");
+        var file = dir.resolve("labeled.json");
         Files.writeString(file, "{\"cases\":[]}");
         assertThrows(IllegalStateException.class, () -> HeldOut.sample(file, agentId, 3, 7));
         assertEquals("{\"cases\":[]}", Files.readString(file));

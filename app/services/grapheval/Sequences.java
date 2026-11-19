@@ -254,7 +254,7 @@ public record Sequences(@Nullable String ownerName, String userMd, List<Chain> c
         var toType = types.get(to);
         if (fromType == null || toType == null) {
             throw new IllegalArgumentException(where + ": '" + (fromType == null ? from : to)
-                    + "' is not an entity id labelled in the chain");
+                    + "' is not an entity id labeled in the chain");
         }
         if (!schema.allows(type, fromType, toType)) {
             throw new IllegalArgumentException(where + ": the schema does not allow " + fromType + " " + type + " "

@@ -93,7 +93,7 @@ class SubagentRunEventsTest extends UnitTest {
         assertEquals((long) seed.parentConvId(), data.get("parentConversationId").getAsLong());
         assertEquals((long) seed.childConvId(), data.get("childConversationId").getAsLong());
         assertEquals((long) seed.childAgentId(), data.get("childAgentId").getAsLong());
-        assertTrue(data.has("label") && data.get("label").isJsonNull(), "an unlabelled run sends label null: " + data);
+        assertTrue(data.has("label") && data.get("label").isJsonNull(), "an unlabeled run sends label null: " + data);
     }
 
     @Test

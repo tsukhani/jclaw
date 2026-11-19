@@ -708,7 +708,7 @@ class GraphEvalHarnessTest extends UnitTest {
                             "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight", "status", "holds"),
                                     Map.of("from", "harborlight", "type", "uses", "to", "kestrel", "status", "holds")),
                             "notRepresentable", List.of("instruction"), "numbers", List.of(), "backReference", false),
-                    Map.of("memoryId", 1, "labelled", false, "text", "unlabelled", "entities", List.of(),
+                    Map.of("memoryId", 1, "labelled", false, "text", "unlabeled", "entities", List.of(),
                             "relations", List.of())));
             Files.writeString(file, GSON.toJson(labeled));
             var loaded = HeldOut.load(file, SCHEMA);
@@ -741,7 +741,7 @@ class GraphEvalHarnessTest extends UnitTest {
             var confusions = report.coverage().confusions();
             assertEquals(List.of("tev1"), confusions.stream().map(CoverageReport.Confusion::model).toList());
             assertEquals(2, confusions.getFirst().rows().get("System").get("System"),
-                    "the gold System, typed as labelled in each of the two runs");
+                    "the gold System, typed as labeled in each of the two runs");
             assertEquals(ExtractionPipeline.fingerprint(SCHEMA), report.extraction());
             assertEquals(1, report.unlabelled());
             assertEquals(new GraphEvalHarness.HeldOutIntegrity(1, 1, 1), report.memoryIntegrity());

@@ -766,7 +766,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             cancelled.set(true);
             if (settled.compareAndSet(false, true)) {
                 guard.cancelled();
-                var e = new LlmException("Stream cancelled before it was read");
+                var e = new LlmException("Stream canceled before it was read");
                 call.failed(e);
                 onError.accept(e);
             }

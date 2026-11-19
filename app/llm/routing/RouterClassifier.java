@@ -69,13 +69,13 @@ public final class RouterClassifier {
             TaskClass.SUMMARIZE, "a request to summarize, recap, condense or extract key points from material.",
             TaskClass.AGENTIC, "an instruction to DO something with tools: run, search, send, schedule, download, "
                     + "create a file/task/reminder/image, or multi-step work.",
-            TaskClass.REASONING, "an answer that must be worked out rather than recalled: proofs, maths, judgement, "
+            TaskClass.REASONING, "an answer that must be worked out rather than recalled: proofs, maths, judgment, "
                     + "critique, comparisons, causes, open questions, design trade-offs.",
             TaskClass.CODING, "code, stack traces, debugging, or writing and changing software."));
 
     static final Map<ReasoningEffort, String> EFFORT_DEFINITIONS = ordered(Map.of(
             ReasoningEffort.LOW, "the answer is quick to give: small talk, a lookup, a routine edit.",
-            ReasoningEffort.MEDIUM, "some care is needed: a few steps, a moderate amount of code, a balanced judgement.",
+            ReasoningEffort.MEDIUM, "some care is needed: a few steps, a moderate amount of code, a balanced judgment.",
             ReasoningEffort.HIGH, "hard: a proof, a subtle bug, a design with real trade-offs, anything easy to get wrong."));
 
     private static final String INSTRUCTIONS = """

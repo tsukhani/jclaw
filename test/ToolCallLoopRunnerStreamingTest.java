@@ -266,7 +266,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                 new ConversationSink(convo));
 
         assertEquals("prior content", result,
-                "Cancelled-at-entry must preserve priorContent");
+                "Canceled-at-entry must preserve priorContent");
         assertEquals(0, streamingServer.getRequestCount(),
                 "No LLM HTTP call should be issued when cancellation flag is set at entry");
     }
@@ -377,7 +377,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                     new LatencyTrace(), new LlmProvider.TurnUsage(), new ArrayList<>(), "web",
                     new ConversationSink(convo));
 
-            assertNotNull(result, "today's behaviour: the turn ends with the diagnostic fallback, not a hang");
+            assertNotNull(result, "today's behavior: the turn ends with the diagnostic fallback, not a hang");
             assertEquals(0, streamingServer.getRequestCount(),
                     "refused before the wire on both the continuation and its synthesis retry");
         } finally {

@@ -541,7 +541,7 @@ class McpStreamableHttpTransportTest extends UnitTest {
             var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
             while (transport.inFlightCalls() > 0 && System.nanoTime() < deadline) Thread.sleep(20);
             assertEquals(0, transport.inFlightCalls());
-            assertEquals(McpClient.State.READY, client.state(), "a cancelled call is not a lost connection");
+            assertEquals(McpClient.State.READY, client.state(), "a canceled call is not a lost connection");
             assertNull(client.lastError());
             assertFalse(client.callTool("fast", new JsonObject()).isError());
         } finally {

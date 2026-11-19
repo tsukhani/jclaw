@@ -232,7 +232,7 @@ class ScrapeJobServiceTest extends UnitTest {
         });
 
         assertEquals(ScrapeJob.State.CANCELLED, state(waiting).state());
-        assertFalse(ran.get(), "a cancelled job never runs");
+        assertFalse(ran.get(), "a canceled job never runs");
         assertEquals(ScrapeJobService.CancelResult.ALREADY_FINISHED, fresh(() -> ScrapeJobService.cancel(waiting)));
     }
 

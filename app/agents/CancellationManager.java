@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class CancellationManager {
 
-    static final String STREAM_CANCELLED_MSG = "Stream cancelled by client disconnect";
+    static final String STREAM_CANCELLED_MSG = "Stream canceled by client disconnect";
 
     private CancellationManager() {
     }
@@ -114,13 +114,13 @@ public final class CancellationManager {
             return priorContent;
         }
         EventLogger.warn("llm", Agent.nameOf(agent), null,
-                "Cancelled in round %d before any synthesis content — emitting labeled fallback"
+                "Canceled in round %d before any synthesis content — emitting labeled fallback"
                         .formatted(round + 1));
         var images = collectedImages != null ? collectedImages : List.<String>of();
         var fallbackPrefix = images.isEmpty() ? "" : String.join("\n\n", images) + "\n\n";
         var fallbackSuffix = MessageDeduplicator.buildDownloadSuffix(images, "", channelType);
         var fallback = fallbackPrefix
-                + "*[Synthesis was cancelled before the model produced any output. Tool results are in the conversation history above — try resending the request.]*"
+                + "*[Synthesis was canceled before the model produced any output. Tool results are in the conversation history above — try resending the request.]*"
                 + fallbackSuffix;
         cb.onToken().accept(fallback);
         return fallback;

@@ -585,7 +585,7 @@ public final class SubagentRegistry {
                     .setParameter("taskRun", taskRunId)
                     .setParameter("running", SubagentRun.Status.RUNNING)
                     .getResultList());
-            running.forEach(runId -> kill(runId, "The task run that started it was cancelled"));
+            running.forEach(runId -> kill(runId, "The task run that started it was canceled"));
         });
     }
 

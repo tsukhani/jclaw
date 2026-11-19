@@ -643,7 +643,7 @@ public final class Commands {
         }
         ConversationQueue.cancelTurn(current.id);
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
-                "/stop signalled cancellation for conversation %d".formatted(current.id));
+                "/stop signaled cancellation for conversation %d".formatted(current.id));
         return new Result(current, "Stopped.", Command.STOP);
     }
 

@@ -133,7 +133,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 verbatim transcript, one line per speaker turn. Enrolled voices are matched \
                 automatically: once action 'enroll_voice' has saved a reference sample under a \
                 'speaker_name' (from an attachment containing ONLY that person), every later \
-                diarization sends the stored samples along so matching voices are labelled by \
+                diarization sends the stored samples along so matching voices are labeled by \
                 name without guessing. Requires a configured diarization model; if none is set \
                 the tool says so — relay that to the user rather than retrying.""";
     }

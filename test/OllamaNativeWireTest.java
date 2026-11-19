@@ -424,7 +424,7 @@ class OllamaNativeWireTest extends UnitTest {
         assertTrue(acc.awaitCompletion(10_000), "the stream completes");
 
         assertNull(acc.error(), () -> "stream failed: " + acc.error());
-        assertEquals("Hello from /v1.", acc.content(), "the same request travelled the OpenAI wire");
+        assertEquals("Hello from /v1.", acc.content(), "the same request traveled the OpenAI wire");
         assertEquals(5, acc.usage().completionTokens());
     }
 

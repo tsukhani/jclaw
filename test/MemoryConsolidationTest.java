@@ -271,7 +271,7 @@ class MemoryConsolidationTest extends UnitTest {
 
         assertEquals(1, result.captured(), "a judge failure must never block the write");
         assertNull(Memory.<Memory>findById(berlinId).supersededAt,
-                "nothing is superseded on a failed judgement");
+                "nothing is superseded on a failed judgment");
         assertEquals(2, Memory.findByAgent(agent).size(), "append-only fallback");
     }
 

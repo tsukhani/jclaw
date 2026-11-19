@@ -1093,7 +1093,7 @@ class SubagentSpawnToolTest extends UnitTest {
             var result = outcome.get(10, java.util.concurrent.TimeUnit.SECONDS);
             assertEquals(SubagentRun.Status.KILLED, result.terminalStatus());
             assertTrue(result.terminalOutcome().contains("parent turn was stopped"), result.terminalOutcome());
-            assertTrue(future.isCancelled(), "the child's future was cancelled through the registry");
+            assertTrue(future.isCancelled(), "the child's future was canceled through the registry");
 
             // kill cancels the future before it writes the row, so the outcome can arrive first.
             SubagentRun row = null;
@@ -2672,7 +2672,7 @@ class SubagentSpawnToolTest extends UnitTest {
         assertTrue(services.SubagentRegistry.isCancelled(run.id),
                 "isCancelled must return true after kill, so AgentRunner's checkpoint observes it");
         assertTrue(fut.isCancelled(),
-                "registered Future must be cancelled after kill");
+                "registered Future must be canceled after kill");
 
         // Caller cleans up the entry as the VT body would.
         services.SubagentRegistry.unregister(run.id);
@@ -2860,7 +2860,7 @@ class SubagentSpawnToolTest extends UnitTest {
                 () -> agents.AgentRunner.checkSubagentCancel(convForRace),
                 "checkpoint must throw when a RUNNING row's registry flag is set");
         assertEquals(runStillRunning.id, thrown.runId(),
-                "exception carries the cancelled run id");
+                "exception carries the canceled run id");
     }
 
     @Test

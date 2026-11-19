@@ -30,14 +30,14 @@ public class RunCancelledException extends RuntimeException {
     private final @Nullable Long runId;
 
     public RunCancelledException(@Nullable Long runId) {
-        super("Subagent run " + runId + " cancelled by operator");
+        super("Subagent run " + runId + " canceled by operator");
         this.runId = runId;
     }
 
     /** JCLAW-414: neutral variant so non-subagent callers (task runs) get a
      *  correct message, e.g. {@code new RunCancelledException(id, "Task")}. */
     public RunCancelledException(@Nullable Long runId, String entity) {
-        super(entity + " run " + runId + " cancelled by operator");
+        super(entity + " run " + runId + " canceled by operator");
         this.runId = runId;
     }
 

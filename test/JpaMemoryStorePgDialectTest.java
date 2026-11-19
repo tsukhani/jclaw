@@ -39,7 +39,7 @@ import java.util.Map;
 class JpaMemoryStorePgDialectTest extends UnitTest {
 
     private static final String BERLIN = "The user lives in Berlin and enjoys hiking";
-    private static final String VIM = "Favourite editor is Vim with a dark theme";
+    private static final String VIM = "Favorite editor is Vim with a dark theme";
     private static final float[] CANNED_VEC = {1f, 0f, 0f, 0f};
 
     @BeforeEach

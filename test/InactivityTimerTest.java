@@ -37,6 +37,6 @@ class InactivityTimerTest extends UnitTest {
         assertEquals(0, fired.get());
         timer.touch();
         Thread.sleep(500);
-        assertEquals(0, fired.get(), "a cancelled timer cannot be re-armed");
+        assertEquals(0, fired.get(), "a canceled timer cannot be re-armed");
     }
 }

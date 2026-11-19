@@ -574,7 +574,7 @@ class MemoryToolTest extends UnitTest {
     @Test
     void forgettingSomethingUnknownSaysSoRatherThanReportingSuccess() {
         seed("The user drives an Xpeng G6");
-        var out = call("{\"action\":\"forget\",\"query\":\"the user's favourite opera\"}");
+        var out = call("{\"action\":\"forget\",\"query\":\"the user's favorite opera\"}");
 
         assertTrue(out.contains("Nothing stored matches"), out);
         assertEquals(1, MemoryStoreFactory.get().list(String.valueOf(agent.id)).size());

@@ -995,7 +995,7 @@ class ChannelTurnStopTest extends UnitTest {
     }
 
     /** What a streamed turn logs at the cancel check that ends it. */
-    private static final String CANCEL_CHECK_LOG = "Stream cancelled by client disconnect";
+    private static final String CANCEL_CHECK_LOG = "Stream canceled by client disconnect";
 
     /** A WhatsApp transport that records every text sent through it. */
     static final class RecordingWhatsApp implements channels.Channel {

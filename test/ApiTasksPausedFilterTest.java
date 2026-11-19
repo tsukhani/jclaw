@@ -42,7 +42,7 @@ class ApiTasksPausedFilterTest extends FunctionalTest {
         assertFalse(body.contains("live-cron"), body);
         // A cancelled task keeps its paused flag (only re-enable clears it) but
         // has no schedule left to suspend, so it is not a paused schedule.
-        assertFalse(body.contains("cancelled-stale-flag"), body);
+        assertFalse(body.contains("canceled-stale-flag"), body);
         assertEquals("2", resp.headers.get("X-Total-Count").value());
     }
 
@@ -81,7 +81,7 @@ class ApiTasksPausedFilterTest extends FunctionalTest {
                     mkTask(agent, "paused-cron", Task.Type.CRON, Task.Status.ACTIVE, true);
                     mkTask(agent, "paused-oneshot", Task.Type.SCHEDULED, Task.Status.PENDING, true);
                     mkTask(agent, "live-cron", Task.Type.CRON, Task.Status.ACTIVE, false);
-                    mkTask(agent, "cancelled-stale-flag", Task.Type.CRON, Task.Status.CANCELLED, true);
+                    mkTask(agent, "canceled-stale-flag", Task.Type.CRON, Task.Status.CANCELLED, true);
                 });
             } catch (Throwable ex) {
                 err.set(ex);

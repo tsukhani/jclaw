@@ -116,7 +116,7 @@ class WhatsAppStreamingSinkTest extends UnitTest {
         var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
         sink.cancel();
         sink.seal("too late");
-        assertTrue(ch.sent.isEmpty(), "a cancelled sink sends nothing on a later seal");
+        assertTrue(ch.sent.isEmpty(), "a canceled sink sends nothing on a later seal");
     }
 
     // --- JF-197b: a stopped turn ---

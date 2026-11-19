@@ -179,7 +179,7 @@ class McpElicitationsTest extends UnitTest {
             var question = awaitQuestion(conversation);
             assertEquals(new McpElicitations.Outcome.Answered(action),
                     McpElicitations.resolve(question.id(), action, JsonParser.parseString(VALID)));
-            var did = action.equals("decline") ? "declined" : "cancelled";
+            var did = action.equals("decline") ? "declined" : "canceled";
             assertEquals("{\"action\":\"" + action + "\"} JClaw: the operator " + did
                     + " the request for input from MCP server 'srv'.", answered(answer), action);
             assertEquals(List.of(), McpElicitations.pendingFor(conversation), action);
@@ -237,7 +237,7 @@ class McpElicitationsTest extends UnitTest {
         assertEquals(List.of(), McpElicitations.pendingFor(conversation));
     }
 
-    private static final String TURN_ENDED = "JClaw: the turn ended (Stop, or the chat closed), which cancelled the request"
+    private static final String TURN_ENDED = "JClaw: the turn ended (Stop, or the chat closed), which canceled the request"
             + " for input from MCP server 'srv'.";
 
     @Test
