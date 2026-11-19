@@ -891,7 +891,6 @@ public final class SessionCompactor {
             return made;
         }
 
-        /** Spends one more call when one is left. */
         boolean spend() {
             if (made >= left) return false;
             made++;

@@ -32,7 +32,6 @@ public final class BodyFields {
 
     private BodyFields() {}
 
-    /** Whether {@code media} is a multipart form. */
     public static boolean multipart(MediaType media) {
         return media.type().equalsIgnoreCase("multipart") && media.subtype().equalsIgnoreCase("form-data");
     }
