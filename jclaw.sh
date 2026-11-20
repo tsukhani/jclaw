@@ -6206,12 +6206,21 @@ _rc_unwire() {
 write_shim() {
     local bin_dir="${JCLAW_BIN_DIR:-$HOME/.local/bin}"
     mkdir -p "$bin_dir" || return 1
+    # bash and dash print a getcwd error while starting in a deleted directory,
+    # before the shim's first line can recover; zsh starts silently there.
+    local interpreter=/bin/sh
+    if [[ -x /bin/zsh ]]; then
+        interpreter="/bin/zsh -f"
+    elif [[ -x /usr/bin/zsh ]]; then
+        interpreter="/usr/bin/zsh -f"
+    fi
     cat > "$bin_dir/jclaw" <<EOF
-#!/bin/sh
+#!$interpreter
 # An upgrade replaces the install directory, leaving any shell sitting in it
 # with a CWD that no longer resolves; recover before exec so jclaw.sh starts
-# clean instead of behind a getcwd error.
-pwd -P >/dev/null 2>&1 || cd / 2>/dev/null
+# clean instead of behind a getcwd error. An external pwd, since zsh's builtin
+# answers "." there and succeeds.
+env pwd -P >/dev/null 2>&1 || cd / 2>/dev/null
 exec "$SCRIPT_DIR/jclaw.sh" "\$@"
 EOF
     chmod +x "$bin_dir/jclaw"
