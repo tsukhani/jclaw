@@ -2137,12 +2137,20 @@ ensure_env_for_start() {
     if [[ ! -f "$env_file" ]]; then
         echo "==> First run detected — no certs/.env and no $var_name in env."
         do_secret
-    elif [[ -z "$(env_file_value "$env_file" "$var_name")" && ! -f "$SCRIPT_DIR/data/jclaw.mv.db" ]]; then
+    elif [[ -z "$(env_file_value "$env_file" "$var_name")" && ! -f "$SCRIPT_DIR/data/jclaw.mv.db" ]] \
+            && ! uses_external_database; then
         # Stored credentials are encrypted under the secret (JCLAW-1455), so a lost one is
         # replaced only before a database exists; past that, require_application_secret stops.
         echo "==> First run detected — certs/.env holds no $var_name and there is no database yet."
         do_secret
     fi
+}
+
+# Whether conf/application.conf points JClaw at a database other than its H2 file. Such a
+# database lives outside data/, so a missing data/jclaw.mv.db says nothing about whether it exists.
+uses_external_database() {
+    grep -E '^[[:space:]]*(%[A-Za-z0-9_-]+\.)?db\.url[[:space:]]*=' "$SCRIPT_DIR/conf/application.conf" 2>/dev/null \
+        | grep -v -E '=[[:space:]]*jdbc:h2:' | grep -q .
 }
 
 # Hard-fail if the conf-named secret variable ends up unset by the time

@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 class FirstStartSecretScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("secret_var_name", "env_file_value", "load_env_file",
-            "ensure_env_for_start", "require_application_secret", "do_secret");
+            "ensure_env_for_start", "uses_external_database", "require_application_secret", "do_secret");
 
     private static final String START = """
             ensure_env_for_start
@@ -172,6 +172,44 @@ class FirstStartSecretScriptTest extends UnitTest {
                 """, run.out());
         assertEquals("", Files.readString(calls));
         assertEquals(HEADER, Files.readString(env));
+    }
+
+    @Test
+    void aCertsEnvWithoutASecretOnAnExternalDatabaseStopsTheStartAndGeneratesNone() throws Exception {
+        Files.writeString(install.resolve("conf/application.conf"),
+                "application.secret=${PLAY_SECRET}\n%prod.db.url=jdbc:postgresql://localhost:5432/jclaw\n");
+        envFile(HEADER);
+        launcher(LAUNCHER);
+
+        var run = run(START, Map.of("STUB_SECRET", "must-not-appear"));
+
+        assertEquals(1, run.exit(), run.out());
+        assertEquals("""
+                Error: PLAY_SECRET resolved to empty after sourcing certs/.env.
+                       Check that certs/.env contains a non-empty value:
+                         PLAY_SECRET=<some-64-char-string>
+                       Rotate or regenerate with: jclaw.sh secret
+                """, run.out());
+        assertEquals("", Files.readString(calls));
+        assertEquals(HEADER, Files.readString(env));
+    }
+
+    @Test
+    void theH2UrlBesideTheCommentedPostgresTemplateStillLetsTheNextStartWriteTheSecret() throws Exception {
+        Files.writeString(install.resolve("conf/application.conf"), """
+                application.secret=${PLAY_SECRET}
+                db.url=jdbc:h2:retry:./data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE
+                # %prod.db.url=jdbc:postgresql://localhost:5432/jclaw
+                """);
+        envFile(HEADER);
+        launcher(LAUNCHER);
+
+        var run = run(START, Map.of("STUB_SECRET", "healed"));
+
+        assertEquals(0, run.exit(), run.out());
+        assertEquals("==> First run detected — certs/.env holds no PLAY_SECRET and there is no database yet.\n"
+                + GENERATED + "started with healed\n", run.out());
+        assertEquals(HEADER + "PLAY_SECRET=healed\n", Files.readString(env));
     }
 
     @Test
