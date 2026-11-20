@@ -6,6 +6,7 @@ import play.test.UnitTest;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
@@ -13,19 +14,80 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
- * Runs jclaw.sh's upgrade merge and its first-start cleanup against real trees on disk (JF-522), so what an
- * upgrade leaves behind, carries and names is tested as jclaw.sh writes it rather than restated.
+ * Runs jclaw.sh's upgrade swap, merge and first-start cleanup against real trees on disk (JF-522), so what an
+ * upgrade replaces, leaves behind, carries and names is tested as jclaw.sh writes it rather than restated.
  */
 class UpgradeMergeScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("sha256_file", "release_path_is_yours", "listed_sha",
             "listed_under", "merge_absent", "_merge_absent", "retire_unlisted_release_files", "upgrade_current_version",
-            "is_developer_clone", "is_container");
+            "is_developer_clone", "is_container", "move_entries", "upgrade_swap_in", "upgrade_unswap");
     private static final List<String> SETTINGS = List.of("UPGRADE_NO_MERGE", "RELEASE_FILES", "RETIRED_RELEASE_FILES",
             "MERGE_SHIPPED", "MERGE_KEPT", "MERGE_LEFT");
 
+    // What a shell in the install folder sees there: three files, the listing and the folder itself.
+    private static final String LOOK = "cat jclaw.sh; printf '|'; cat .play-version; printf '|'; cat data/jclaw.mv.db; "
+            + "printf '|'; LC_ALL=C ls -A | tr '\\n' ' '; printf '|'; /bin/pwd -P";
+
     @TempDir
     Path tmp;
+
+    @Test
+    void anUpgradeLeavesAShellInTheInstallFolderLookingAtTheNewRelease() throws Exception {
+        var home = installed();
+        var fresh = release();
+
+        var seen = fromAShellInTheInstall(home, "upgrade_swap_in '" + fresh + "' \"$SCRIPT_DIR.previous\"\n"
+                + "merge_absent \"$SCRIPT_DIR.previous\" \"$SCRIPT_DIR\" ''\n"
+                + "rm -rf \"$SCRIPT_DIR.previous\"");
+
+        assertEquals("the new script|1.13.90|the database|.jclaw-manifest .play-version CHANGELOG.md data jclaw.sh "
+                + "release-files.tsv |"
+                + home.toRealPath() + "\n", seen);
+        assertFalse(Files.exists(previous(home)));
+    }
+
+    @Test
+    void aRollbackPutsTheOldReleaseBackInTheFolderAShellSitsIn() throws Exception {
+        var home = installed();
+        var fresh = release();
+
+        var seen = fromAShellInTheInstall(home, "upgrade_swap_in '" + fresh + "' \"$SCRIPT_DIR.previous\"\n"
+                + "merge_absent \"$SCRIPT_DIR.previous\" \"$SCRIPT_DIR\" ''\n"
+                + "upgrade_unswap \"$SCRIPT_DIR.previous\"");
+
+        assertEquals("the old script|1.13.88|the database|.jclaw-manifest .play-version data jclaw.sh |"
+                + home.toRealPath() + "\n", seen);
+        assertFalse(Files.exists(previous(home)));
+    }
+
+    @Test
+    void anInstallThatCannotBeMovedAsideIsLeftAsItWas() throws Exception {
+        var home = installed();
+        unmovable(home.resolve("zz-locked"));
+        var fresh = release();
+
+        var out = run(home, "rc=0; upgrade_swap_in '" + fresh + "' \"$SCRIPT_DIR.previous\" 2>/dev/null || rc=$?\n"
+                + "echo \"rc=$rc\"; " + listing(home, fresh));
+
+        assertEquals("rc=1\n.jclaw-manifest .play-version data jclaw.sh zz-locked \n"
+                + ".play-version CHANGELOG.md jclaw.sh release-files.tsv \nno previous\n", out);
+        assertEquals("the old script", read(home, "jclaw.sh"));
+    }
+
+    @Test
+    void aReleaseThatCannotBeMovedInIsRolledBackToTheOldContents() throws Exception {
+        var home = installed();
+        var fresh = release();
+        unmovable(fresh.resolve("zz-locked"));
+
+        var out = run(home, "rc=0; upgrade_swap_in '" + fresh + "' \"$SCRIPT_DIR.previous\" 2>/dev/null || rc=$?\n"
+                + "echo \"rc=$rc\"; upgrade_unswap \"$SCRIPT_DIR.previous\"; " + listing(home, fresh));
+
+        assertEquals("rc=2\n.jclaw-manifest .play-version data jclaw.sh \n"
+                + ".play-version CHANGELOG.md jclaw.sh release-files.tsv zz-locked \nno previous\n", out);
+        assertEquals("the old script", read(home, "jclaw.sh"));
+    }
 
     @Test
     void anUpgradeLeavesBehindWhatTheOldReleaseShippedAndTheNewOneDrops() throws Exception {
@@ -165,6 +227,55 @@ class UpgradeMergeScriptTest extends UnitTest {
             assertEquals("", run(home, "retire_unlisted_release_files"), name);
             assertEquals("a tracked file", read(home, "CONTRIBUTING.md"), name);
         }
+    }
+
+    private Path installed() throws Exception {
+        var home = tree("jclaw");
+        write(home, "jclaw.sh", "the old script");
+        write(home, ".play-version", "1.13.88");
+        write(home, ".jclaw-manifest", "version=1.0.25");
+        write(home, "data/jclaw.mv.db", "the database");
+        return home;
+    }
+
+    private Path release() throws Exception {
+        var fresh = tree("staging/jclaw");
+        write(fresh, "jclaw.sh", "the new script");
+        write(fresh, ".play-version", "1.13.90");
+        write(fresh, "CHANGELOG.md", "the new release's notes");
+        listShipped(fresh, "jclaw.sh", ".play-version", "CHANGELOG.md");
+        return fresh;
+    }
+
+    private static Path previous(Path home) {
+        return Path.of(home + ".previous");
+    }
+
+    // A directory cannot be renamed into another one without write permission on itself, to rewrite its "..".
+    private static void unmovable(Path dir) throws Exception {
+        Files.createDirectory(dir);
+        Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("r-xr-xr-x"));
+    }
+
+    private static String listing(Path home, Path fresh) {
+        return "LC_ALL=C ls -A '" + home + "' | tr '\\n' ' '; echo; LC_ALL=C ls -A '" + fresh + "' | tr '\\n' ' '; echo\n"
+                + "[[ -e '" + previous(home) + "' ]] && echo previous || echo 'no previous'";
+    }
+
+    /** Runs {@code swap} while another shell sits in the install folder, and returns what that shell then sees. */
+    private String fromAShellInTheInstall(Path home, String swap) throws Exception {
+        var ready = tmp.resolve("ready");
+        var go = tmp.resolve("go");
+        var seen = tmp.resolve("seen");
+        return run(home, "mkfifo '" + ready + "' '" + go + "'\n"
+                + "( cd \"$SCRIPT_DIR\" && echo >'" + ready + "' && read -r _ <'" + go + "' && { " + LOOK + "; } ) >'"
+                + seen + "' 2>&1 &\n"
+                + "shell=$!\n"
+                + "read -r _ <'" + ready + "'\n"
+                + swap + "\n"
+                + "echo >'" + go + "'\n"
+                + "wait \"$shell\" || true\n"
+                + "cat '" + seen + "'");
     }
 
     private String merge(Path old, Path fresh) throws Exception {

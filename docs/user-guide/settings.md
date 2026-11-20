@@ -295,7 +295,7 @@ Upgrade only applies to installs made by the one-line installer or from an unzip
 - **A container**: the image is the upgrade unit; use `docker compose pull && docker compose up -d`. A tree swap inside the container would be thrown away on the next start.
 - **No shell to run `jclaw.sh`**: on Windows, install Git for Windows (which provides Git Bash), or run JClaw under WSL.
 - **`jclaw.sh` missing or not executable** in the install directory: the installation is not managed by `jclaw.sh`.
-- **The install directory, or the directory above it, is not writable**: the upgrade replaces the install directory in place by swapping it within its parent.
+- **The install directory, or the directory above it, is not writable**: the upgrade moves the old files into a folder next to the install directory and puts the new ones in their place.
 
 Whatever the reason, the release check still runs, and the explanation only appears when there is a newer release to explain. An install already on the newest release reports just that, **up to date**, with nothing to do.
 

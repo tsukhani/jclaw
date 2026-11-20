@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# `upgrade` replaces the install directory, so a shell sitting in it hands us a
-# dead CWD — without this, every subshell prints getcwd errors before any output.
+# A shell can sit in a directory that is gone, such as an install an older
+# release's `upgrade` replaced — without this, every subshell prints getcwd
+# errors before any output.
 pwd -P >/dev/null 2>&1 || cd "${0%/*}" 2>/dev/null || cd / 2>/dev/null
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -6216,9 +6217,9 @@ write_shim() {
     fi
     cat > "$bin_dir/jclaw" <<EOF
 #!$interpreter
-# An upgrade replaces the install directory, leaving any shell sitting in it
-# with a CWD that no longer resolves; recover before exec so jclaw.sh starts
-# clean instead of behind a getcwd error. An external pwd, since zsh's builtin
+# A shell can sit in a directory that is gone, such as an install an older
+# release's upgrade replaced; recover before exec so jclaw.sh starts clean
+# instead of behind a getcwd error. An external pwd, since zsh's builtin
 # answers "." there and succeeds.
 env pwd -P >/dev/null 2>&1 || cd / 2>/dev/null
 exec "$SCRIPT_DIR/jclaw.sh" "\$@"
@@ -6912,15 +6913,21 @@ do_upgrade() {
     UPGRADE_DB_BACKUP="$db_backup"
 
     echo "==> Installing ${target#v}…"
-    # The first move is the point of no return; before it, a failure has changed
-    # nothing, so it exits rather than rolling back.
-    mv "$SCRIPT_DIR" "$prev" || {
-        echo "Error: could not move the current install aside — nothing was changed." >&2
+    # Moving the old contents aside is the point of no return; a failure there
+    # is undone in place, so it exits rather than rolling back.
+    local swap=0
+    upgrade_swap_in "$new_tree" "$prev" || swap=$?
+    if [[ "$swap" == 1 || "$swap" == 3 ]]; then
+        if [[ "$swap" == 1 ]]; then
+            echo "Error: could not move the current install aside — nothing was changed." >&2
+        else
+            echo "Error: could not move the current install aside, nor put back what had moved; the rest of it is in $prev." >&2
+        fi
         upgrade_status failed 0 "Could not replace the install directory."
         exit 1
-    }
+    fi
     UPGRADE_SWAPPED=true
-    mv "$new_tree" "$SCRIPT_DIR" || upgrade_abort "could not move the new release into place"
+    [[ "$swap" == 0 ]] || upgrade_abort "could not move the new release into place"
     cd "$SCRIPT_DIR" || upgrade_abort "could not enter the new install directory"
     hash -r
     upgrade_status swapping 0 "Installing ${target#v}…"
@@ -7066,19 +7073,64 @@ upgrade_probe() {
     fi
 }
 
+# Move every entry of directory $1, dotfiles included, into directory $2,
+# stopping at the first that fails. A name $2 already holds counts as a
+# failure: mv would put the entry inside a directory of that name.
+move_entries() {
+    local saved entry rc=0
+    # `|| true` inside the substitution, for the reason merge_absent gives.
+    saved=$(shopt -p nullglob dotglob || true)
+    shopt -s nullglob dotglob
+    for entry in "$1"/*; do
+        if [[ -e "$2/${entry##*/}" || -L "$2/${entry##*/}" ]] || ! mv "$entry" "$2/"; then
+            rc=1
+            break
+        fi
+    done
+    eval "$saved"
+    return "$rc"
+}
+
+# Replace the install's contents with the release in $1, moving the old ones
+# into $2. The folder itself stays, so a shell sitting in it is left in the new
+# release rather than in a deleted directory. Returns 1, with nothing changed,
+# when the old contents cannot be moved aside; 2 when the release cannot be
+# moved in after them, the old contents then waiting in $2 for upgrade_unswap;
+# 3 when the old contents could neither be moved aside nor all put back.
+upgrade_swap_in() {
+    mkdir "$2" || return 1
+    if ! move_entries "$SCRIPT_DIR" "$2"; then
+        move_entries "$2" "$SCRIPT_DIR" && rmdir "$2" && return 1
+        return 3
+    fi
+    if ! move_entries "$1" "$SCRIPT_DIR"; then
+        move_entries "$SCRIPT_DIR" "$1" || true
+        return 2
+    fi
+}
+
+# Undo upgrade_swap_in: what the new release's run left that the old tree
+# lacks moves back into $1, the rest of the new release goes, and the old
+# contents return to the install folder.
+upgrade_unswap() {
+    local prev="$1" saved
+    merge_absent "$SCRIPT_DIR" "$prev" ""
+    saved=$(shopt -p nullglob dotglob || true)
+    shopt -s nullglob dotglob
+    rm -rf "${SCRIPT_DIR:?}"/*
+    eval "$saved"
+    move_entries "$prev" "$SCRIPT_DIR" && rmdir "$prev"
+}
+
 # Undo the swap: state moves back out of the new tree, the old tree returns,
 # and the pre-upgrade database is restored over whatever schema migration the
 # new version applied on its way up.
 upgrade_rollback() {
-    local prev="$1" db_backup="$2" parent
-    parent="$(cd "$SCRIPT_DIR/.." && pwd)"
+    local prev="$1" db_backup="$2"
     "$SCRIPT_DIR/jclaw.sh" stop --backend-port "$BACKEND_PORT" >/dev/null 2>&1 || true
 
     rm -f "$SCRIPT_DIR"/conf/application.conf.new-* 2>/dev/null || true
-    merge_absent "$SCRIPT_DIR" "$prev" ""
-    cd "$parent" 2>/dev/null || cd / || true
-    rm -rf "$SCRIPT_DIR"
-    mv "$prev" "$SCRIPT_DIR"
+    upgrade_unswap "$prev" || echo "Error: could not put all of the old install back; the rest of it is in $prev." >&2
     cd "$SCRIPT_DIR"
     hash -r
 
