@@ -132,6 +132,15 @@ Isolating a provider yourself (tripping its breaker by hand) sends nothing. When
 
 Everything on this instance (conversations, agents, tasks, memories, config) lives in one H2 data file, `data/jclaw.mv.db`, except each agent's memory graph, which is kept beside it under `data/memory-graph/`. This section is the place to see how that file is doing and to keep a copy of it. It sits beside Maintenance because two of its actions, restore and repair, take the instance down the way a restart does.
 
+:::gotcha
+A hard stop can lose the most recent changes. A hard stop is one that gives JClaw no chance to close the data file: a crash, a power cut, the system running out of memory, `kill -9`, or `docker kill`.
+
+- H2 writes each change to the data file up to half a second after it is saved, so a hard stop in that time loses the change.
+- Once JClaw has been running for a minute or more, a known H2 defect can also lose the last change saved before a hard stop, however long before the stop it was saved, if nothing else was saved after it.
+
+A normal stop or restart, such as **Restart** under Maintenance or `jclaw stop`, closes the data file first and loses nothing, unless `jclaw stop` has to kill an instance that is still stopping after 60 seconds. PostgreSQL does not have these limits: with its default settings, it writes each change to disk before it reports the change as saved.
+:::
+
 ### The health strip
 
 The top of the panel is one line: the **verdict**, the **size** of the data file (with the trace file, a pre-restore copy and any repair remnants added up beside it), how much a **compaction would free**, **free space** on that volume, how long ago the **last backup** was taken, the **H2 version**, and how long a probe query took. Below it is the reason for the verdict, in words, and under that the line that sets when the panel flags a compaction (see [Compaction](#settings-compaction)).
