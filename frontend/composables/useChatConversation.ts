@@ -244,9 +244,9 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     if (hasOlderMessages.value && oldestShown != null) void loadEarlierUsages(id, oldestShown, current)
   }
 
-  async function loadOlderMessages(apply: PrependOlder = async (prepend) => {
+  async function loadOlderMessages(apply: PrependOlder = (prepend) => {
     prepend()
-    return true
+    return Promise.resolve(true)
   }) {
     const id = selectedConvoId.value
     const oldestShown = messages.value[0]?.id

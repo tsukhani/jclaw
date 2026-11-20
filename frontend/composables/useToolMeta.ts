@@ -163,7 +163,7 @@ function loadDetail(name: string): Promise<ToolDetail> {
 
 export function useToolMeta() {
   // Kick off the fetch eagerly so consumers don't have to remember to await.
-  ensureLoaded()
+  void ensureLoaded()
 
   const TOOL_META: ComputedRef<Record<string, ToolMeta>> = computed(() => {
     const out: Record<string, ToolMeta> = {}

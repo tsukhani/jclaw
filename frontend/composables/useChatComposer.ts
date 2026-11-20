@@ -103,7 +103,7 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
       const replacement = completer.accept(input.value)
       if (replacement !== null) {
         input.value = replacement
-        nextTick(() => autoResize())
+        void nextTick(() => autoResize())
       }
     }
     else if (event.key === 'Escape') {
@@ -132,7 +132,7 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
     const replacement = completer.accept(input.value)
     if (replacement !== null) {
       input.value = replacement
-      nextTick(() => {
+      void nextTick(() => {
         autoResize()
         chatInput.value?.focus()
       })

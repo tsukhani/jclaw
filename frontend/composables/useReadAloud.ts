@@ -177,6 +177,7 @@ async function toggle(key: string, rawText: string) {
         catch {
           continue // skip malformed frame
         }
+        // One frame at a time: decodes finish out of order, and each chunk must play after the one before it.
         await handleEvent(key, ev)
       }
       if (activeKey !== key) return // stopped / superseded mid-stream

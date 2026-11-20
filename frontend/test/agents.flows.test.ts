@@ -1055,6 +1055,51 @@ describe('Agents page — Inspect prompt dialog', () => {
     expect(legend).not.toContain('deploy')
   })
 
+  it('the Skills row itemizes its skills through a button a keyboard can reach, and no other section offers one', async () => {
+    registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
+      totalChars: 270,
+      totalTokenEstimate: 68,
+      cacheBoundaryMarker: '',
+      cacheablePrefixChars: 270,
+      staticPrefixChars: 270,
+      coreMemoryChars: 0,
+      variableSuffixChars: 0,
+      sections: [
+        { name: 'Identity', chars: 200, tokens: 50 },
+        { name: 'Skills', chars: 70, tokens: 18 },
+      ],
+      skills: [
+        { name: 'deploy', chars: 40, tokens: 10 },
+        { name: 'review', chars: 30, tokens: 8 },
+      ],
+      tools: [],
+    }))
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+    await component.findAll('button').find(b => b.text().trim() === 'Inspect prompt')!.trigger('click')
+    await flushPromises()
+
+    const toggles = component.findAll('[data-testid="toggle-skills-breakdown"]')
+    expect(toggles).toHaveLength(1)
+    const toggle = toggles[0]!
+    expect(toggle.element.tagName).toBe('BUTTON')
+    expect(toggle.text()).toBe('Skills')
+    const itemized = () => component.findAll('td').map(td => td.text()).filter(t => t.startsWith('└'))
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(itemized()).toEqual(['└deploy', '└review'])
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(itemized()).toEqual([])
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(itemized()).toEqual(['└deploy', '└review'])
+  })
+
   it('View Full fetches and renders the assembled prompt text', async () => {
     registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
       totalChars: 100,

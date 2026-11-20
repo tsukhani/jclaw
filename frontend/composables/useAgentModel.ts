@@ -409,7 +409,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
       body: { thinkingMode: mode },
     }))
     overrideError.value = ok ? null : saveError.value!.message
-    refreshConversations()
+    void refreshConversations()
   }
 
   /**
@@ -443,7 +443,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
         body: { modelProvider, modelId },
       }))
       overrideError.value = ok ? null : saveError.value!.message
-      refreshConversations()
+      void refreshConversations()
       return
     }
 

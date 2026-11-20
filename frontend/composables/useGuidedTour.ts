@@ -315,8 +315,8 @@ export function useGuidedTour() {
   }
 
   function goToStepRoute(step: TourStep) {
-    if (isOnStepRoute(step)) showStepForCurrentPage()
-    else router.push(locationForStep(step))
+    if (isOnStepRoute(step)) void showStepForCurrentPage()
+    else void router.push(locationForStep(step))
   }
 
   /** Open the intro dialog. Always opens regardless of backend flag — the
@@ -419,7 +419,7 @@ export function installGuidedTourHooks() {
   // same page — e.g. /settings?section=timezone → ?section=providers — still
   // re-drives the step onto the section that carries its anchor (JCLAW-680).
   watch(() => route.fullPath, () => {
-    if (tour.isActive.value) tour.showStepForCurrentPage()
+    if (tour.isActive.value) void tour.showStepForCurrentPage()
   })
 }
 

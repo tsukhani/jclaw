@@ -442,14 +442,11 @@ public final class SecretRedactor {
         while (i < s.length()) {
             char c = s.charAt(i);
             if (Character.isWhitespace(c)) break;
-            if (c == '\\') {
-                i = Math.min(s.length(), i + 2);
-            } else if (c == '"' || c == '\'') {
-                int close = closing(s, i + 1, new Quote(String.valueOf(c), 0));
-                i = Math.min(s.length(), close + 1);
-            } else {
-                i++;
-            }
+            i = switch (c) {
+                case '\\' -> Math.min(s.length(), i + 2);
+                case '"', '\'' -> Math.min(s.length(), closing(s, i + 1, new Quote(String.valueOf(c), 0)) + 1);
+                default -> i + 1;
+            };
         }
         return i;
     }

@@ -3820,18 +3820,25 @@ const agentKinds = [
                     v-for="s in sortedSections"
                     :key="'section-' + s.name"
                   >
-                    <tr
-                      class="border-b border-neutral-900/50"
-                      :class="s.name === 'Skills' && promptBreakdownData.skills.length > 0 ? 'cursor-pointer hover:bg-neutral-900/30' : ''"
-                      @click="s.name === 'Skills' && promptBreakdownData.skills.length > 0 ? (skillsExpanded = !skillsExpanded) : null"
-                    >
+                    <tr class="border-b border-neutral-900/50">
                       <td class="py-1 pr-2 text-fg-primary">
-                        {{ s.name }}<ChevronRightIcon
+                        <button
                           v-if="s.name === 'Skills' && promptBreakdownData.skills.length > 0"
-                          class="inline-block w-2.5 h-2.5 ml-1 align-middle transition-transform"
-                          :class="skillsExpanded ? 'rotate-90' : ''"
-                          aria-hidden="true"
-                        />
+                          type="button"
+                          data-testid="toggle-skills-breakdown"
+                          class="inline-flex items-center p-0 bg-transparent border-0 cursor-pointer text-fg-primary hover:text-fg-strong"
+                          :aria-expanded="skillsExpanded"
+                          @click="skillsExpanded = !skillsExpanded"
+                        >
+                          {{ s.name }}<ChevronRightIcon
+                            class="inline-block w-2.5 h-2.5 ml-1 align-middle transition-transform"
+                            :class="skillsExpanded ? 'rotate-90' : ''"
+                            aria-hidden="true"
+                          />
+                        </button>
+                        <template v-else>
+                          {{ s.name }}
+                        </template>
                       </td>
                       <td class="py-1 px-2 text-right text-fg-muted">
                         {{ formatChars(s.chars) }}

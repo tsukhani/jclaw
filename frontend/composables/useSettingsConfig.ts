@@ -103,7 +103,7 @@ export function useProvideSettingsConfig() {
     saving.value = true
     try {
       await $fetch('/api/config', { method: 'POST', body: { key, value } })
-      refresh()
+      void refresh()
     }
     finally {
       saving.value = false
@@ -147,11 +147,11 @@ export function useProvideSettingsConfig() {
         body: { key, value: editValue.value },
       })
       editingKey.value = null
-      refresh()
+      void refresh()
       // JCLAW-280: provider-scoped config rows (modality, subscription price,
       // API keys) feed the /api/providers projection; refresh it so provider
       // billing rows reflect the new value immediately.
-      if (key.startsWith('provider.')) refreshProviders()
+      if (key.startsWith('provider.')) void refreshProviders()
     }
     catch (e) {
       editError.value = apiErrorDetails(e)

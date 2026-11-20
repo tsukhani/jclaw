@@ -135,6 +135,7 @@ async function save() {
   testResult.value = null
   testError.value = null
   if (await attempt(async () => {
+    // One write at a time, in plan order: the first refused write stops the ones after it.
     for (const write of writes) {
       await $fetch('/api/config', { method: 'POST', body: { key: proxyKey(write.field), value: write.value } })
     }

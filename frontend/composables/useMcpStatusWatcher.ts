@@ -57,7 +57,7 @@ export function useMcpStatusWatcher(
 
   onMounted(() => {
     watching = true
-    loop()
+    void loop()
   })
 
   onBeforeUnmount(() => {

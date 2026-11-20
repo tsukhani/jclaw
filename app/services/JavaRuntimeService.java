@@ -231,6 +231,13 @@ public final class JavaRuntimeService {
             return zuluBuild(vendorVersion != null ? vendorVersion : releaseField(javaHome, "IMPLEMENTOR_VERSION"));
         }
 
+        /** The build a Zulu version string names, 25.38.105 for {@code Zulu25.38+105-CA}; null for any other vendor's. */
+        private static @Nullable String zuluBuild(@Nullable String vendorVersion) {
+            if (vendorVersion == null) return null;
+            var m = ZULU.matcher(vendorVersion.strip());
+            return m.lookingAt() ? m.group(1) + "." + m.group(2) : null;
+        }
+
         /**
          * The running Java's vendor, from {@code java.vendor} or, when the JVM sets none, the runtime's release file;
          * null for a vendor JClaw never installs. Read from the Java itself, so it never disagrees with what runs.
@@ -377,8 +384,11 @@ public final class JavaRuntimeService {
 
     /** Test seam: {@code override} as its own vendor's catalog answer, the other vendor's catalog unreachable. */
     public static void setLatestForTest(@Nullable Release override) {
-        catalogOverride = override == null ? null
-                : v -> v == override.vendor() ? new Answer(override, null) : unreachable(v);
+        if (override == null) {
+            catalogOverride = null;
+            return;
+        }
+        catalogOverride = v -> v == override.vendor() ? new Answer(override, null) : unreachable(v);
     }
 
     /** Test seam: runs in place of {@link #download}. In test mode nothing downloads without it. */
@@ -734,13 +744,6 @@ public final class JavaRuntimeService {
             return null;
         }
         return null;
-    }
-
-    /** The build a Zulu version string names, 25.38.105 for {@code Zulu25.38+105-CA}; null for any other vendor's. */
-    private static @Nullable String zuluBuild(@Nullable String vendorVersion) {
-        if (vendorVersion == null) return null;
-        var m = ZULU.matcher(vendorVersion.strip());
-        return m.lookingAt() ? m.group(1) + "." + m.group(2) : null;
     }
 
     /**

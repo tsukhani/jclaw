@@ -1262,6 +1262,7 @@ function zoneForTaskRender(task: Task): string | undefined {
             v-for="task in tasks"
             :key="task.id"
           >
+            <!-- The row click is a mouse shortcut for the row's checkbox, which is the keyboard path. -->
             <tr
               :class="{ 'bg-muted/30 cursor-pointer': selectMode }"
               @click="selectMode ? toggleSelection(task.id) : undefined"

@@ -238,7 +238,7 @@ function sendFrame(input: Float32Array) {
   ws.send(pcm.buffer)
 }
 
-async function onMessage(ev: MessageEvent) {
+function onMessage(ev: MessageEvent) {
   if (typeof ev.data !== 'string') return
   let msg: { type?: string, value?: string, text?: string, audio?: string, message?: string, turn?: number }
   try {

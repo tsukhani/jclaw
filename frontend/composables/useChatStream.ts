@@ -751,15 +751,15 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // triggerRef can add height (markdown codeblocks expand, metrics pill
     // appears if usage arrived after complete). Wait a tick so the DOM
     // reflects the final layout, then pin to the bottom.
-    nextTick().then(followToBottom)
-    refreshConversations()
+    void nextTick().then(followToBottom)
+    void refreshConversations()
     // Re-sync agents too: the agent can rewrite its own model mid-turn via
     // the jclaw_api tool (PUT /api/agents/{id} → Agent.modelProvider/modelId).
     // The header selector reads selectedAgent through effectiveModel, so
     // without this it stays pinned to the pre-switch model until a manual
     // reload. The tool's PUT commits in its own Tx mid-turn, well before the
     // terminal frame, so the new value is already persisted by now.
-    refreshAgents()
+    void refreshAgents()
     // Every engine commits the reply before it publishes the terminal frame, so the bubble pairs with it now. The saved
     // rows can render taller than the bubble, with no frame after them, so a reader at the bottom follows them (JF-229).
     void mergeRows().then(() => nextTick(followToBottom))
@@ -925,7 +925,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
         messages.value = [...messages.value, sent, reply]
         triggerRef(messages)
       }
-      nextTick().then(scrollToBottom)
+      void nextTick().then(scrollToBottom)
       return
     }
     if (elsewhere) follow(answer.conversationId!)
@@ -938,7 +938,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       messages.value = [...messages.value, reply]
       triggerRef(messages)
     }
-    nextTick().then(scrollToBottom)
+    void nextTick().then(scrollToBottom)
     // A /stop typed here ended the open turn, whose stopped frame may never arrive: an idle read ends it on the page.
     if (turn) await settleIfIdle()
   }
@@ -1058,7 +1058,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       if (pendingCompact && !pendingCompact.ended && answer?.compaction) {
         setCompaction({ phase: 'done', ...answer.compaction, tokensBefore: answer.compaction.tokensBefore })
       }
-      refreshConversations()
+      void refreshConversations()
       // A row the last merge held back for a send not yet answered shows now, whatever the answer.
       if (deps.holdingRows?.()) void mergeRows()
       // The operator left the view the message was sent from; the turn runs on and shows wherever its conversation opens.
