@@ -2118,8 +2118,9 @@ load_env_file() {
     fi
 }
 
-# First-run helper for the start paths: if certs/.env is absent AND the
-# conf-named secret variable is unset in the parent shell, generate one.
+# First-run helper for the start paths: if the conf-named secret variable
+# is unset in the parent shell and certs/.env is absent, or holds no value
+# for it while there is no database yet, generate one.
 # This is what makes `./jclaw.sh start` work on a fresh jclaw.zip install
 # with no developer setup step. We DON'T auto-create when the operator
 # has already exported the variable externally — that'd overwrite their
@@ -2132,8 +2133,14 @@ ensure_env_for_start() {
     # Bash indirect expansion: `${!var_name:-}` reads the variable whose
     # NAME is held in $var_name. Equivalent to `${APP_SECRET:-}` when
     # var_name="APP_SECRET", but follows whatever the conf line dictates.
-    if [[ ! -f "$env_file" && -z "${!var_name:-}" ]]; then
+    [[ -z "${!var_name:-}" ]] || return 0
+    if [[ ! -f "$env_file" ]]; then
         echo "==> First run detected — no certs/.env and no $var_name in env."
+        do_secret
+    elif [[ -z "$(env_file_value "$env_file" "$var_name")" && ! -f "$SCRIPT_DIR/data/jclaw.mv.db" ]]; then
+        # Stored credentials are encrypted under the secret (JCLAW-1455), so a lost one is
+        # replaced only before a database exists; past that, require_application_secret stops.
+        echo "==> First run detected — certs/.env holds no $var_name and there is no database yet."
         do_secret
     fi
 }
@@ -2148,10 +2155,9 @@ require_application_secret() {
     local var_name
     var_name=$(secret_var_name)
     if [[ -z "${!var_name:-}" ]]; then
-        # Reachable only when certs/.env exists but lacks (or empties) the
-        # key, OR when the launcher set the env var to an empty string.
-        # The ensure_env_for_start guard upstream creates certs/.env on
-        # first run, so this is operator-misconfiguration territory.
+        # Reachable only when certs/.env lacks (or empties) the key beside
+        # an existing database: ensure_env_for_start generates the secret
+        # before then, so this is operator-misconfiguration territory.
         echo "Error: $var_name resolved to empty after sourcing certs/.env."
         echo "       Check that certs/.env contains a non-empty value:"
         echo "         $var_name=<some-64-char-string>"
@@ -2320,7 +2326,9 @@ do_secret() {
     # header here keeps those comments intact across future rotations.
     # umask 077 ensures the file is owner-only readable from creation,
     # before the secret lands.
+    local created=false
     if [[ ! -f "$env_file" ]]; then
+        created=true
         (
             umask 077
             printf '%s\n' \
@@ -2352,7 +2360,14 @@ do_secret() {
     # `application.secret=${VARNAME}` line, generates a fresh 64-char
     # alphanumeric value, and writes <VARNAME>=<value> to certs/.env
     # (PF-71 default). Run from $SCRIPT_DIR so it locates the right conf.
-    (cd "$SCRIPT_DIR" && play secret)
+    # Removing the file this call made puts the install back in its first-run state for the next start.
+    if ! (cd "$SCRIPT_DIR" && play secret) || [[ -z "$(env_file_value "$env_file" "$var_name")" ]]; then
+        if [[ "$created" == true ]]; then
+            rm -f "$env_file"
+        fi
+        echo "Error: 'play secret' did not write a new $var_name to certs/.env."
+        exit 1
+    fi
 
     # `play secret` doesn't tighten perms, so re-apply chmod 600 — the
     # secret is the admin-session-forgery primitive; non-owner reads
