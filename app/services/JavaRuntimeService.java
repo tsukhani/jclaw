@@ -1121,7 +1121,7 @@ public final class JavaRuntimeService {
         var home = env.home();
         Thread.ofVirtual().name("java-runtime-download").start(() -> {
             try {
-                runStage(release, home, progress, stager);
+                runStage(release, home, progress, stager, true);
             } catch (IOException | RuntimeException _) {
                 // runStage recorded it for the panel and logged it
             }
@@ -1131,7 +1131,9 @@ public final class JavaRuntimeService {
 
     /**
      * {@link #requestStage} in the caller's thread, for the daily check: the same refusals, the same lock and
-     * the same progress the panel follows, so the check and the Settings button never stage at once.
+     * the same progress the panel follows, so the check and the Settings button never stage at once. A failure is
+     * thrown and not kept in {@code progress}, whose {@link Download#lastError} the panel shows as its own
+     * download's: the daily check records it apart.
      *
      * @throws IllegalStateException when {@link #stageable} refuses, checked before anything is written
      * @throws IOException           when the download or its check fails, which leaves nothing staged
@@ -1139,7 +1141,7 @@ public final class JavaRuntimeService {
     public static Release stageNow(Environment env, @Nullable Release latest, Download progress, Stager stager)
             throws IOException {
         var release = beginStage(env, answerOf(env, latest), progress);
-        runStage(release, env.home(), progress, stager);
+        runStage(release, env.home(), progress, stager, false);
         return release;
     }
 
@@ -1157,12 +1159,13 @@ public final class JavaRuntimeService {
         return release;
     }
 
-    private static void runStage(Release release, Path home, Download progress, Stager stager) throws IOException {
+    private static void runStage(Release release, Path home, Download progress, Stager stager, boolean keepFailure)
+            throws IOException {
         try {
             stager.stage(release, home, progress);
             EventLogger.info(CATEGORY, "Java " + release.version() + " is staged; the next start installs it");
         } catch (IOException | RuntimeException e) {
-            progress.failed("Java " + release.version() + " could not be downloaded: " + e.getMessage());
+            if (keepFailure) progress.failed("Java " + release.version() + " could not be downloaded: " + e.getMessage());
             EventLogger.warn(CATEGORY, "Java runtime download failed: " + e.getMessage(), release.url());
             throw e;
         } finally {

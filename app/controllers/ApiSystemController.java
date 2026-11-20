@@ -328,7 +328,7 @@ public class ApiSystemController extends Controller {
      * @param downloadingVersion   what it downloads, or null
      * @param downloadingVendor    whose Java that is, or null
      * @param downloadPercent      how far it is, or null when no download runs
-     * @param downloadError        why the last download failed, or null
+     * @param downloadError        why the last download Settings started failed, or null
      * @param lastStart            jclaw.sh's line about what the last start did with a staged runtime,
      *                             or null when the last start had none to install
      * @param lastStartAt          when that line was written (ISO-8601), or null

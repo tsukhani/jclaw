@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -30,8 +31,8 @@ import java.util.regex.Pattern;
  * patch into {@code jre.staged/} exactly as Settings → Maintenance → Java runtime does, for the next start to
  * install; on a Java JClaw did not install it only tells the operator. Either way the operator hears once per
  * build, through a {@link Notification}, and once when the check keeps failing: the same build failing to download
- * on two runs in a row, or the catalog on three. Nothing here stops or restarts JClaw. A container's image brings
- * its Java and a source checkout runs its developer's, so neither is looked at.
+ * on two daily checks in a row, or the catalog on three. Nothing here stops or restarts JClaw. A container's image
+ * brings its Java and a source checkout runs its developer's, so neither is looked at.
  */
 public final class JavaRuntimePatchCheck {
 
@@ -46,9 +47,9 @@ public final class JavaRuntimePatchCheck {
     public static final String HANDLED_FILE = "java-runtime.notified";
 
     /**
-     * Under {@code <app>/data/}: how many runs in a row could not check the catalog or download one build, whether
-     * the operator was told of each, and the last failure, for the panel. Counted by run, so a restart between two
-     * runs keeps the counts. Absent while nothing fails.
+     * Under {@code <app>/data/}: how many daily checks in a row could not check the catalog or download one build,
+     * when each count last rose, whether the operator was told of each, and the last failure, for the panel. On
+     * disk, so a restart keeps the counts. Absent while nothing fails.
      */
     public static final String FAILURES_FILE = "java-runtime.failures";
 
@@ -57,9 +58,11 @@ public final class JavaRuntimePatchCheck {
     private static final String CATEGORY = "java-runtime";
     // Years of patches; the oldest falls off first.
     private static final int HANDLED_KEPT = 32;
-    // One failed run can be a network blip; the notices name these counts in words.
+    // One failed daily check can be a network blip; the notices name these counts in words.
     private static final int DOWNLOAD_RUNS = 2;
     private static final int CATALOG_RUNS = 3;
+    // Each start runs the check too, so failed runs closer than this are one daily check; @Every's are 24 h apart.
+    private static final Duration DAILY_CHECK_SPACING = Duration.ofHours(20);
     private static final int REASON_MAX_CHARS = 300;
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final String RESTART_HINT = " and installs the next time JClaw restarts. "
@@ -214,15 +217,14 @@ public final class JavaRuntimePatchCheck {
         }
         var owner = JavaRuntimeService.running(env).owner;
         var reason = sentence(brief(failure));
-        failures.failed("Couldn't check " + owner + "'s catalog for a newer Java: " + reason);
-        failures.catalogRuns++;
-        if (failures.catalogRuns < CATALOG_RUNS || failures.catalogTold) return;
+        int runs = failures.catalogFailed("Couldn't check " + owner + "'s catalog for a newer Java: " + reason);
+        if (runs < CATALOG_RUNS || failures.catalogTold) return;
         if (notify(recipient, "JClaw couldn't check " + owner + "'s catalog for a newer Java on three daily checks "
                 + "in a row, so it cannot tell whether Java " + env.javaVersion() + " has a newer patch. The last "
                 + "check failed with: " + reason + " JClaw keeps checking once a day.", null, null)) {
             failures.catalogTold = true;
             EventLogger.info(CATEGORY, "Told the operator that " + owner + "'s catalog could not be checked on "
-                    + CATALOG_RUNS + " runs in a row");
+                    + CATALOG_RUNS + " daily checks in a row");
         }
     }
 
@@ -230,14 +232,15 @@ public final class JavaRuntimePatchCheck {
                                        String recipient) {
         var reason = sentence(brief(e instanceof JavaRuntimeService.RefusedException refused ? refused.inWords()
                 : Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName())));
-        failures.failed(name(env, release) + " could not be downloaded: " + reason);
-        if (failures.downloadFailed(release.archive()) < DOWNLOAD_RUNS || failures.buildTold) return;
+        int runs = failures.downloadFailed(release.archive(),
+                name(env, release) + " could not be downloaded: " + reason);
+        if (runs < DOWNLOAD_RUNS || failures.buildTold) return;
         if (notify(recipient, named(env, release) + " could not be downloaded on two daily checks in a row: " + reason
                 + " JClaw tries again at each daily check, or try it now from Settings > Maintenance > Java runtime.",
                 release.notesUrl(), release.notesLabel())) {
             failures.buildTold = true;
             EventLogger.info(CATEGORY, "Told the operator that Java " + release.version() + " could not be "
-                    + "downloaded on " + DOWNLOAD_RUNS + " runs in a row");
+                    + "downloaded on " + DOWNLOAD_RUNS + " daily checks in a row");
         }
     }
 
@@ -307,25 +310,43 @@ public final class JavaRuntimePatchCheck {
     private static final class Failures {
         int catalogRuns;
         boolean catalogTold;
+        @Nullable Instant catalogAt;
         @Nullable String build;
         int buildRuns;
+        @Nullable Instant buildAt;
         boolean buildTold;
         @Nullable String line;
         @Nullable Instant at;
 
         void catalogReached() {
             catalogRuns = 0;
+            catalogAt = null;
             catalogTold = false;
         }
 
-        /** @return the runs in a row that have now failed to download {@code archive} */
-        int downloadFailed(String archive) {
+        /** Records {@code why}; @return the daily checks in a row that have now failed to check the catalog */
+        int catalogFailed(String why) {
+            var now = failed(why);
+            if (newDailyCheck(catalogAt, now)) {
+                catalogRuns++;
+                catalogAt = now;
+            }
+            return catalogRuns;
+        }
+
+        /** Records {@code why}; @return the daily checks in a row that have now failed to download {@code archive} */
+        int downloadFailed(String archive, String why) {
+            var now = failed(why);
             if (!archive.equals(build)) {
                 build = archive;
                 buildRuns = 0;
+                buildAt = null;
                 buildTold = false;
             }
-            buildRuns++;
+            if (newDailyCheck(buildAt, now)) {
+                buildRuns++;
+                buildAt = now;
+            }
             return buildRuns;
         }
 
@@ -333,12 +354,20 @@ public final class JavaRuntimePatchCheck {
         void settled() {
             build = null;
             buildRuns = 0;
+            buildAt = null;
             buildTold = false;
         }
 
-        void failed(String why) {
+        private Instant failed(String why) {
+            var now = AppClock.now();
             line = why;
-            at = AppClock.now();
+            at = now;
+            return now;
+        }
+
+        // abs: once the clock is set back a day, a run counts rather than waiting for the clock to pass the record.
+        private static boolean newDailyCheck(@Nullable Instant counted, Instant now) {
+            return counted == null || Duration.between(counted, now).abs().compareTo(DAILY_CHECK_SPACING) >= 0;
         }
 
         static Failures read(Path app) {
@@ -353,17 +382,14 @@ public final class JavaRuntimePatchCheck {
                 return f;
             }
             f.catalogRuns = count(fields.get("catalog"));
+            f.catalogAt = instant(fields.get("catalogAt"));
             f.catalogTold = "true".equals(fields.get("catalogTold"));
             f.build = fields.get("build");
             f.buildRuns = f.build == null ? 0 : count(fields.get("buildRuns"));
+            f.buildAt = f.build == null ? null : instant(fields.get("buildAt"));
             f.buildTold = "true".equals(fields.get("buildTold"));
             f.line = fields.get("failure");
-            try {
-                var at = fields.get("failureAt");
-                f.at = at == null ? null : Instant.parse(at);
-            } catch (DateTimeParseException _) {
-                f.at = null;
-            }
+            f.at = instant(fields.get("failureAt"));
             return f;
         }
 
@@ -375,9 +401,11 @@ public final class JavaRuntimePatchCheck {
                     return;
                 }
                 var out = new StringBuilder("catalog=" + catalogRuns + "\ncatalogTold=" + catalogTold + "\n");
+                if (catalogAt != null) out.append("catalogAt=").append(catalogAt).append('\n');
                 if (build != null) {
                     out.append("build=").append(build).append("\nbuildRuns=").append(buildRuns).append("\nbuildTold=")
                             .append(buildTold).append('\n');
+                    if (buildAt != null) out.append("buildAt=").append(buildAt).append('\n');
                 }
                 if (line != null && at != null) {
                     out.append("failure=").append(line).append("\nfailureAt=").append(at).append('\n');
@@ -394,6 +422,14 @@ public final class JavaRuntimePatchCheck {
                 return value == null ? 0 : Math.max(0, Integer.parseInt(value.strip()));
             } catch (NumberFormatException _) {
                 return 0;
+            }
+        }
+
+        private static @Nullable Instant instant(@Nullable String value) {
+            try {
+                return value == null ? null : Instant.parse(value.strip());
+            } catch (DateTimeParseException _) {
+                return null;
             }
         }
     }

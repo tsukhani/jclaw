@@ -562,7 +562,7 @@ class ApiSystemControllerTest extends FunctionalTest {
     }
 
     @Test
-    void theDailyChecksLastFailureIsShownUntilACheckSucceeds() throws Exception {
+    void theDailyChecksLastFailureIsShownOnceUntilACheckSucceeds() throws Exception {
         login();
         var env = builtIn("25.0.4", false);
         JavaRuntimeService.setEnvironmentForTest(env);
@@ -576,14 +576,16 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertTrue(before.get("checkFailure").isJsonNull());
         assertTrue(before.get("checkFailureAt").isJsonNull());
 
+        // The job's progress, which the panel's own downloads share.
         AppClock.runWith(Clock.fixed(Instant.parse("2026-11-20T09:00:00Z"), ZoneOffset.UTC),
-                () -> JavaRuntimePatchCheck.run(env, () -> checked(release("25.0.5")), new JavaRuntimeService.Download(),
+                () -> JavaRuntimePatchCheck.run(env, () -> checked(release("25.0.5")), JavaRuntimeService.CURRENT,
                         down, "jf542-operator"));
 
         var failed = json(GET("/api/system/java-runtime"));
         assertEquals("Java 25.0.5 could not be downloaded: HTTP 503 fetching " + url + ".",
                 failed.get("checkFailure").getAsString());
         assertEquals("2026-11-20T09:00:00Z", failed.get("checkFailureAt").getAsString());
+        assertTrue(failed.get("downloadError").isJsonNull(), failed.get("downloadError").toString());
 
         JavaRuntimePatchCheck.run(env, () -> checked(release("25.0.4")), new JavaRuntimeService.Download(), down,
                 "jf542-operator");

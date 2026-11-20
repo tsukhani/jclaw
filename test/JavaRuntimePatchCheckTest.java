@@ -36,6 +36,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -518,7 +519,6 @@ class JavaRuntimePatchCheckTest extends UnitTest {
         // The count is all a restart has to go on until the next run.
         assertEquals(List.of("java-runtime.failures"), listing(env.app().resolve("data")));
 
-        now = now.plusSeconds(86_400);
         check(env, down, new Download());
         check(env, down, new Download());
 
@@ -657,6 +657,57 @@ class JavaRuntimePatchCheckTest extends UnitTest {
     }
 
     @Test
+    void failedDownloadsLessThan20HoursApartCountAsOneDailyCheck() throws IOException {
+        var env = builtIn("25.0.4");
+        var down = azul(catalog(true, sha(JRE)), 503);
+
+        check(env, down, new Download());
+        // A restart ten minutes later runs the check at its start, and so does one just short of the next day's run.
+        checkAfter(Duration.ofMinutes(10), env, down, new Download());
+        checkAfter(Duration.ofHours(20).minusMinutes(10).minusSeconds(1), env, down, new Download());
+
+        assertEquals(List.of(), notices());
+        assertEquals(new JavaRuntimePatchCheck.Failure("Java 25.0.5.1 could not be downloaded: HTTP 503 fetching https://"
+                + CDN_PATH + ".", now), JavaRuntimePatchCheck.lastFailure(env.app()));
+
+        checkAfter(Duration.ofSeconds(1), env, down, new Download());
+
+        assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, could not be downloaded on "
+                + "two daily checks in a row: HTTP 503 fetching https://" + CDN_PATH + ". JClaw tries again at each "
+                + "daily check, or try it now from Settings > Maintenance > Java runtime." + LINK), notices());
+    }
+
+    @Test
+    void startsDuringOneCatalogOutageCountAsOneDailyCheck() throws IOException {
+        var env = builtIn(VERSION);
+        var down = catalogDown();
+
+        check(env, down, new Download());
+        checkAfter(Duration.ofMinutes(10), env, down, new Download());
+        checkAfter(Duration.ofMinutes(10), env, down, new Download());
+        check(env, down, new Download());
+
+        assertEquals(List.of(), notices());
+
+        check(env, down, new Download());
+
+        assertEquals(List.of("Java runtime | JClaw couldn't check Azul's catalog for a newer Java on three daily checks "
+                + "in a row, so it cannot tell whether Java 25.0.5.1 has a newer patch. The last check failed with: HTTP "
+                + "503 from Azul's catalog. JClaw keeps checking once a day. | null null"), notices());
+    }
+
+    @Test
+    void aRunAfterTheClockIsSetBackADayIsADailyCheckOfItsOwn() throws IOException {
+        var env = builtIn("25.0.4");
+        var down = azul(catalog(true, sha(JRE)), 503);
+
+        check(env, down, new Download());
+        checkAfter(Duration.ofDays(-1), env, down, new Download());
+
+        assertEquals(1, notices().size());
+    }
+
+    @Test
     void aHostJavaIsToldOnlyThatItsCatalogCannotBeChecked() throws IOException {
         var javaHome = Files.createDirectories(tmp.resolve("usr/lib/jvm/java-25"));
         var env = new Environment(app(), javaHome, "25.0.4", "Ubuntu", "Linux", "amd64", false);
@@ -737,7 +788,14 @@ class JavaRuntimePatchCheckTest extends UnitTest {
     }
 
 
+    /** One daily run, a day after the last. */
     private void check(Environment env, OkHttpClient azul, Download progress) {
+        checkAfter(Duration.ofDays(1), env, azul, progress);
+    }
+
+    /** A run {@code gap} after the last, as a start shortly after a daily run makes one. */
+    private void checkAfter(Duration gap, Environment env, OkHttpClient azul, Download progress) {
+        now = now.plus(gap);
         var lookup = new JavaRuntimeService.Lookup();
         AppClock.runWith(Clock.fixed(now, ZoneOffset.UTC), () -> HttpFactories.runWith(azul,
                 () -> JavaRuntimePatchCheck.run(env, () -> lookup.check(() -> JavaRuntimeService.fetchLatest(env)),

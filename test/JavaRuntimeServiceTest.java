@@ -983,7 +983,8 @@ class JavaRuntimeServiceTest extends UnitTest {
     }
 
     @Test
-    void aDownloadInTheCallersThreadIsRefusedAsTheButtonsIsAndAFailureIsThrownAndKept() throws IOException {
+    void aDownloadInTheCallersThreadIsRefusedAsTheButtonsIsAndAFailureIsThrownButNotKeptForThePanel()
+            throws IOException {
         var app = install();
         var env = env(app, Files.createDirectories(tmp.resolve("jre/Home")), "25.0.4", false);
         var calls = new AtomicInteger();
@@ -1006,7 +1007,8 @@ class JavaRuntimeServiceTest extends UnitTest {
                 }));
         assertEquals("the network went away", failed.getMessage());
         assertFalse(progress.active());
-        assertEquals("Java 25.0.5 could not be downloaded: the network went away", progress.lastError());
+        // The daily check records its own failure, which the panel shows on a line of its own.
+        assertNull(progress.lastError());
     }
 
     // --- helpers ---
