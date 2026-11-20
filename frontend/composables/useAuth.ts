@@ -70,7 +70,7 @@ export function useAuth() {
     await attempt(() => $fetch('/api/auth/logout', { method: 'POST' }))
     authenticated.value = false
     username.value = null
-    void navigateTo('/login')
+    await navigateTo('/login')
   }
 
   async function checkAuth(): Promise<boolean> {

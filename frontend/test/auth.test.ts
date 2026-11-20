@@ -90,4 +90,41 @@ describe('useAuth', () => {
 
     expect(result).toBe(false)
   })
+
+  it('logout signs the client out and is on the login page once it resolves', async () => {
+    registerEndpoint('/api/auth/login', {
+      method: 'POST',
+      handler: () => ({ status: 'ok', username: 'admin' }),
+    })
+    registerEndpoint('/api/auth/logout', { method: 'POST', handler: () => ({ status: 'ok' }) })
+    const { authenticated, username, login, logout } = useAuth()
+    await login('admin', 'password')
+    await useRouter().push('/chat')
+
+    await logout()
+
+    expect(authenticated.value).toBe(false)
+    expect(username.value).toBeNull()
+    expect(useRouter().currentRoute.value.path).toBe('/login')
+  })
+
+  it('a refused logout still signs the client out and lands on the login page', async () => {
+    registerEndpoint('/api/auth/login', {
+      method: 'POST',
+      handler: () => ({ status: 'ok', username: 'admin' }),
+    })
+    registerEndpoint('/api/auth/logout', {
+      method: 'POST',
+      handler: () => { throw createError({ statusCode: 500 }) },
+    })
+    const { authenticated, username, login, logout } = useAuth()
+    await login('admin', 'password')
+    await useRouter().push('/chat')
+
+    await logout()
+
+    expect(authenticated.value).toBe(false)
+    expect(username.value).toBeNull()
+    expect(useRouter().currentRoute.value.path).toBe('/login')
+  })
 })
