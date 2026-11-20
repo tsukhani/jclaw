@@ -34,9 +34,10 @@ import java.util.stream.Stream;
 class JavaRuntimeScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("native_path", "jre_javas_in", "use_bundled_jre",
-            "sha256_file", "conf_jvm_modules", "jre_status", "jre_version_norm", "jre_reported_version",
-            "jre_reported_build", "jre_reported_vendor", "jre_zip_tool", "jre_install_staged", "apply_staged_jre",
-            "restart_status", "restart_phase_end", "restart_phase", "aot_fingerprint", "upgrade_install_kind");
+            "sha256_file", "conf_jvm_modules", "jre_status", "jre_record_unrunnable", "jre_version_norm",
+            "jre_reported_version", "jre_reported_build", "jre_reported_vendor", "jre_zip_tool", "jre_install_staged",
+            "apply_staged_jre", "restart_status", "restart_phase_end", "restart_phase", "aot_fingerprint",
+            "upgrade_install_kind");
     private static final List<String> VARIABLES = List.of("JRE_MAJOR");
 
     private static final String OLD_TOP = "zulu25.36.15-ca-jre25.0.4-macosx_aarch64";
@@ -272,6 +273,50 @@ class JavaRuntimeScriptTest extends UnitTest {
         // Run as the start runs it: a runtime missing the module jvm.memory adds reports nothing.
         stage(home, TARBALL, tarGz(runtime(NEW_TOP, "25.0.5", false)));
         assertKept(home, run(home, Map.of(), "apply_staged_jre"), "kept Java 25.0.4: Java 25.0.5 reported no version when it ran");
+        assertFalse(Files.exists(unrunnableFile(home)), "a Java that runs without the module can run on this system");
+    }
+
+    @Test
+    void aStagedJavaThatCannotRunOnThisSystemKeepsTheHostsJavaSaysSoAndIsRecordedOnce() throws Exception {
+        var home = hostInstall();
+        var host = hostJava("25.0.3");
+        var env = Map.of("JAVA_HOME", host.toString(), "PATH", uname("Linux", "aarch64") + File.pathSeparator
+                + System.getenv("PATH"));
+        stage(home, TARBALL, "25.0.5", null, "Zulu", tarGz(unrunnable(NEW_TOP)));
+
+        var line = "kept the host's Java 25.0.3: Zulu 25.0.5 cannot run on this system (Linux aarch64)";
+        assertEquals("==> Installing the downloaded Java runtime...\n    Java runtime: " + line + "\n"
+                + "JAVA_HOME=" + host + "\n", run(home, env, "apply_staged_jre; echo \"JAVA_HOME=$JAVA_HOME\""));
+        assertEquals(line, status(home));
+        assertEquals("Zulu\n", Files.readString(unrunnableFile(home)));
+        assertFalse(Files.exists(home.resolve("jre")));
+        assertFalse(Files.exists(home.resolve("jre.new")));
+        assertFalse(Files.exists(home.resolve("jre.staged")), "a staging that failed is dropped, not retried");
+
+        stage(home, TARBALL, "25.0.5", null, "Zulu", tarGz(unrunnable(NEW_TOP)));
+        run(home, env, "apply_staged_jre");
+        stage(home, TEMURIN_TARBALL, "25.0.5", null, "Temurin", tarGz(unrunnable(TEMURIN_TOP)));
+        assertEquals("==> Installing the downloaded Java runtime...\n    Java runtime: kept the host's Java 25.0.3: "
+                + "Temurin 25.0.5 cannot run on this system (Linux aarch64)\n", run(home, env, "apply_staged_jre"));
+        assertEquals("Zulu\nTemurin\n", Files.readString(unrunnableFile(home)), "each vendor once, on its own line");
+    }
+
+    @Test
+    void aSwitchFromTheBuiltInJavaThatCannotRunOnThisSystemKeepsTheBuiltInJava() throws Exception {
+        var home = install();
+        var env = Map.of("PATH", uname("Linux", "x86_64") + File.pathSeparator + System.getenv("PATH"));
+
+        stage(home, TEMURIN_TARBALL, "25.0.5", null, "Temurin", tarGz(unrunnable(TEMURIN_TOP)));
+        assertKept(home, run(home, env, "apply_staged_jre"),
+                "kept Java 25.0.4: Temurin 25.0.5 cannot run on this system (Linux x86_64)");
+        assertEquals("Temurin\n", Files.readString(unrunnableFile(home)));
+
+        // A manifest an earlier release staged names no vendor, so the start cannot say whose Java it was.
+        Files.delete(unrunnableFile(home));
+        stage(home, TARBALL, tarGz(unrunnable(NEW_TOP)));
+        assertKept(home, run(home, env, "apply_staged_jre"),
+                "kept Java 25.0.4: Java 25.0.5 cannot run on this system (Linux x86_64)");
+        assertFalse(Files.exists(unrunnableFile(home)));
     }
 
     @Test
@@ -535,6 +580,26 @@ class JavaRuntimeScriptTest extends UnitTest {
                 echo "OpenJDK Runtime Environment %s (build %s+8-LTS)" >&2
                 """.formatted(hasModule ? "yes" : "no", version, vendorVersion == null ? "" : vendorVersion, version));
         return files;
+    }
+
+    /** A runtime whose {@code java} cannot start: its loader is missing, as a glibc build's was in JF-547's nixos/nix container. */
+    private static Map<String, String> unrunnable(String top) {
+        var files = new LinkedHashMap<String, String>();
+        files.put(top + HOME_IN_ARCHIVE + "/release", "JAVA_VERSION=\"25.0.5\"\n");
+        files.put(top + HOME_IN_ARCHIVE + "/bin/java", "#!/no/such/ld-linux-aarch64.so.1\n");
+        return files;
+    }
+
+    /** A directory whose {@code uname} names this system {@code os} on {@code machine}. */
+    private Path uname(String os, String machine) throws IOException {
+        var bin = Files.createDirectories(tmp.resolve("uname"));
+        executable(bin.resolve("uname"), "#!/bin/sh\ncase \"$1\" in -s) echo " + os + " ;; -m) echo " + machine
+                + " ;; *) exit 1 ;; esac\n");
+        return bin;
+    }
+
+    private static Path unrunnableFile(Path home) {
+        return home.resolve("jclaw/data/java-runtime.unrunnable");
     }
 
     private static void stage(Path home, String archive, byte[] bytes) throws Exception {

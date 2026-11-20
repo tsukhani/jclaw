@@ -73,6 +73,12 @@ public final class JavaRuntimeService {
     public static final String MANIFEST = "manifest";
     /** Written by jclaw.sh under {@code data/}. */
     public static final String STATUS_FILE = "java-runtime.status";
+    /**
+     * Written under {@code data/} by install.sh and jclaw.sh: the {@link Vendor#label} of each vendor whose Java did
+     * not start on this system, one a line. Kept per vendor: Zulu's and Temurin's builds differ, so one that cannot
+     * run here says nothing certain about the other.
+     */
+    public static final String UNRUNNABLE_FILE = "java-runtime.unrunnable";
     private static final int STATUS_MAX_CHARS = 300;
 
     private static final int TIMEOUT_SECONDS = 20;
@@ -640,6 +646,28 @@ public final class JavaRuntimeService {
         return answer(env, vendor, MANAGED_MAJOR, refresh);
     }
 
+    /**
+     * Why {@code vendor}'s Java can never be switched to here, as {@link #UNRUNNABLE_FILE} records, or null. The
+     * vendor of a built-in Java runs here whatever the file says, so its own patches are never refused.
+     */
+    private static @Nullable String cannotRun(Environment env, Vendor vendor) {
+        if (vendor == running(env) && kind(env) == Kind.BUILT_IN) return null;
+        try {
+            var lines = Files.readAllLines(env.app().resolve("data").resolve(UNRUNNABLE_FILE), StandardCharsets.UTF_8);
+            if (lines.stream().noneMatch(l -> Vendor.named(l) == vendor)) return null;
+        } catch (IOException _) {
+            return null;
+        }
+        return vendor.label + " cannot run on this system (" + env.osName() + " " + env.osArch()
+                + "): it did not start when JClaw tried it here.";
+    }
+
+    /** {@link #answer}, or a vendor that cannot run here with why, its catalog unasked. */
+    private static Answer runnable(Environment env, Vendor vendor, int major, boolean refresh) {
+        var why = cannotRun(env, vendor);
+        return why != null ? new Answer(null, why) : answer(env, vendor, major, refresh);
+    }
+
     static Answer unreachable(Vendor vendor) {
         return new Answer(null, unreachableWhy(vendor));
     }
@@ -1057,13 +1085,13 @@ public final class JavaRuntimeService {
     /**
      * What a request for {@code vendor} would stage, from that vendor's catalog: on the built-in Java, the newest of
      * its major, a patch from its own vendor or a switch to the other; on a bundle install on a host Java, the
-     * {@link #managed} Java of {@code vendor}.
+     * {@link #managed} Java of {@code vendor}. A vendor {@link #UNRUNNABLE_FILE} lists has no release, only why.
      *
      * @param vendor null for the built-in Java's own vendor, or for Azul on a host Java
      */
     public static Answer offer(Environment env, @Nullable Vendor vendor, boolean refresh) {
         var target = vendor != null ? vendor : defaultTarget(env);
-        return switchable(env) ? managed(env, target, refresh) : answer(env, target, major(env.javaVersion()), refresh);
+        return runnable(env, target, switchable(env) ? MANAGED_MAJOR : major(env.javaVersion()), refresh);
     }
 
     /**
@@ -1082,7 +1110,7 @@ public final class JavaRuntimeService {
         var out = new ArrayList<Switch>();
         for (var vendor : targets) {
             boolean askedAlready = vendor == running(env) && major == major(env.javaVersion());
-            var answer = answer(env, vendor, major, refresh && !askedAlready);
+            var answer = runnable(env, vendor, major, refresh && !askedAlready);
             String refusal = null;
             try {
                 stageable(env, answer, null, false);

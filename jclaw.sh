@@ -3393,6 +3393,14 @@ jre_status() {
     echo "    Java runtime: $1"
 }
 
+# Adds vendor $1, once, to the vendors whose Java did not start on this system, as install.sh does: Settings
+# offers no switch to one (JavaRuntimeService.UNRUNNABLE_FILE).
+jre_record_unrunnable() {
+    local file="$SCRIPT_DIR/data/java-runtime.unrunnable"
+    mkdir -p "$SCRIPT_DIR/data" 2>/dev/null || true
+    grep -qx "$1" "$file" 2>/dev/null || printf '%s\n' "$1" >> "$file" 2>/dev/null || true
+}
+
 # Drops trailing .0 parts, so the catalog's 25.0.0 matches the "25" that Java reports for it.
 jre_version_norm() {
     local v="$1"
@@ -3440,8 +3448,9 @@ jre_zip_tool() {
 JRE_MAJOR=25
 
 # Installs $1/jre.staged into $1/jre and prints what it did, or prints why not and returns 1 having
-# touched nothing but $1/jre.new. Every check runs before the first rename. With no $1/jre yet, the
-# start runs on the host's Java, and the staging is the switch from it that Settings offers.
+# touched nothing but $1/jre.new, or 2 when the staged Java cannot run on this system at all. Every check
+# runs before the first rename. With no $1/jre yet, the start runs on the host's Java, and the staging is
+# the switch from it that Settings offers.
 jre_install_staged() {
     local home="$1" staged="$1/jre.staged" version sha archive build vendor old_vendor="" old_java current was kept got tool javas new_java mods host=""
     local version_re='^[0-9]+(\.[0-9]+)*$' sha_re='^[0-9a-f]{64}$' archive_re='^[A-Za-z0-9][A-Za-z0-9._-]*\.(tar\.gz|zip)$'
@@ -3524,6 +3533,10 @@ jre_install_staged() {
     # shellcheck disable=SC2086
     got=$(jre_reported_version "$new_java" $mods)
     if [[ "$got" != "$(jre_version_norm "$version")" ]]; then
+        # Without the modules, so a Java that lacks one is not taken for one built for another C library or CPU.
+        if [[ -z "$got" ]] && ! "$new_java" -version >/dev/null 2>&1; then
+            echo "${kept}: ${vendor:-Java} ${version} cannot run on this system ($(uname -s) $(uname -m))"; return 2
+        fi
         echo "${kept}: Java ${version} reported ${got:-no version} when it ran"; return 1
     fi
     if [[ -n "$vendor" ]]; then
@@ -3573,7 +3586,7 @@ jre_install_staged() {
 # here because no JVM of this install runs yet. A staged runtime that fails is dropped and the start carries
 # on with the current one; either way the outcome goes to data/java-runtime.status.
 apply_staged_jre() {
-    local home outcome version version_re='^[0-9]+(\.[0-9]+)*$'
+    local home outcome version vendor rc version_re='^[0-9]+(\.[0-9]+)*$'
     home="$(cd "$SCRIPT_DIR/.." && pwd)"
     # The JVM writes the manifest last, so a download it never finished is never picked up. The status
     # line describes only the start that installed or refused a runtime, so a start with none clears it.
@@ -3590,6 +3603,12 @@ apply_staged_jre() {
         jre_status "$outcome"
         use_bundled_jre
     else
+        rc=$?
+        if [[ "$rc" == 2 ]]; then
+            # A manifest an earlier release staged names no vendor, so there is none to record.
+            vendor=$(sed -n 's/^vendor=//p' "$home/jre.staged/manifest" | head -1)
+            if [[ -n "$vendor" ]]; then jre_record_unrunnable "$vendor"; fi
+        fi
         rm -rf "$home/jre.new" "$home/jre.staged" || true
         jre_status "$outcome"
     fi

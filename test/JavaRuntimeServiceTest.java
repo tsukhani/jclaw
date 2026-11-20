@@ -436,6 +436,55 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertEquals(List.of(), switches(client, wsl(app, system)));
     }
 
+    @Test
+    void aVendorWhoseJavaDidNotStartOnThisSystemIsRefusedWithoutAskingItsCatalogAndTheOtherIsStillOffered()
+            throws IOException {
+        var app = install();
+        var payload = Files.readString(Play.applicationPath.toPath().resolve("test/adoptium-catalog-jre25-linux-x64.json"));
+        var asked = new ArrayList<String>();
+        Interceptor catalogs = chain -> {
+            asked.add(chain.request().url().host());
+            return "api.azul.com".equals(chain.request().url().host())
+                    ? answer(chain.request(), 200, "[" + entry("zulu25.38.201-ca-jre25.0.5.1-linux_x64.tar.gz",
+                            "[25,0,5,1]", "[25,38,201,0]", "A1") + "]")
+                    : answer(chain.request(), 200, payload);
+        };
+        var client = new OkHttpClient.Builder().addInterceptor(catalogs).build();
+        var system = Files.createDirectories(tmp.resolve("nix/store/openjdk-headless-25"));
+        // Of another major, so each switch asks its catalog past the cache other tests share.
+        var nix = new Environment(app, system, "27.0.1", "N/A", "Linux", "amd64", false);
+        var zulu = "Zulu cannot run on this system (Linux amd64): it did not start when JClaw tried it here.";
+        unrunnable(app, "Zulu\n");
+
+        assertEquals(List.of(new Switch(Vendor.ZULU, null, zulu), new Switch(Vendor.TEMURIN, "25.0.5.1", null)),
+                switches(client, nix));
+        assertEquals(List.of("api.adoptium.net"), asked, "a vendor that cannot run here is never asked for a Java");
+        assertEquals(new Answer(null, zulu), HttpFactories.callWith(client, () -> JavaRuntimeService.offer(nix, null, false)));
+        var e = assertThrows(IllegalStateException.class, () -> JavaRuntimeService.requestStage(nix,
+                JavaRuntimeService.offer(nix, Vendor.ZULU, false), new Download(), (r, home, p) -> fail("staged " + r)));
+        assertEquals(zulu, e.getMessage());
+        assertEquals(List.of("api.adoptium.net"), asked);
+
+        // One line for each vendor that did not start; a blank or unknown line refuses nothing.
+        unrunnable(app, "Zulu\n\nCorretto\nTemurin\n");
+        var temurin = "Temurin cannot run on this system (Linux amd64): it did not start when JClaw tried it here.";
+        assertEquals(List.of(new Switch(Vendor.ZULU, null, zulu), new Switch(Vendor.TEMURIN, null, temurin)),
+                switches(client, nix));
+        unrunnable(app, "Corretto\n\n");
+        assertEquals(List.of(new Switch(Vendor.ZULU, "25.0.5.1", null), new Switch(Vendor.TEMURIN, "25.0.5.1", null)),
+                switches(client, nix));
+
+        // The vendor of the built-in Java runs here, so only the switch away from it can be refused.
+        var jre = Files.createDirectories(tmp.resolve("jre/Home"));
+        var builtIn = new Environment(app, jre, "25.0.5", "Azul Systems, Inc.", "Linux", "amd64", false);
+        unrunnable(app, "Zulu\nTemurin\n");
+        assertEquals(List.of(new Switch(Vendor.TEMURIN, null, temurin)), switches(client, builtIn));
+        var patch = HttpFactories.callWith(client, () -> JavaRuntimeService.offer(builtIn, null, true));
+        assertEquals("25.0.5.1", JavaRuntimeService.stageable(builtIn, patch, null, false).version());
+        assertEquals(new Answer(null, temurin),
+                HttpFactories.callWith(client, () -> JavaRuntimeService.offer(builtIn, Vendor.TEMURIN, false)));
+    }
+
     // --- What a download may do ---
 
     @Test
@@ -1024,6 +1073,12 @@ class JavaRuntimeServiceTest extends UnitTest {
         var app = tmp.resolve("jclaw");
         Files.createDirectories(app.resolve("conf"));
         return app;
+    }
+
+    /** {@code data/java-runtime.unrunnable} as install.sh and jclaw.sh write it. */
+    private static void unrunnable(Path app, String lines) throws IOException {
+        Files.createDirectories(app.resolve("data"));
+        Files.writeString(app.resolve("data/java-runtime.unrunnable"), lines);
     }
 
     private static String first(Path file, String regex) throws IOException {

@@ -33,7 +33,8 @@ class InstallerJavaScriptTest extends UnitTest {
     private static final List<String> VARIABLES = List.of("JCLAW_HOME", "JCLAW_NO_JRE", "JCLAW_INSTALL_JRE",
             "JCLAW_FORCE_REINSTALL", "APP_DIR", "JRE_DIR", "MIN_JAVA", "JAVA_MODULE", "AZUL_API", "TTY");
     private static final List<String> FUNCTIONS = List.of("step", "substep", "warn", "die", "check_java", "upgrading",
-            "java_ok", "want_jre", "find_jre", "provision_jre", "verify_sha256", "http_get", "java_missing", "download");
+            "java_ok", "want_jre", "find_jre", "provision_jre", "verify_sha256", "http_get", "java_missing", "download",
+            "record_unrunnable_jre");
 
     private static final String TOP = "zulu25.38.107-ca-jre25.0.5-linux_x64";
     private static final String TARBALL = TOP + ".tar.gz";
@@ -67,6 +68,7 @@ class InstallerJavaScriptTest extends UnitTest {
                 java=%3$s/bin/java
                 """.formatted(host, TARBALL, managedHome())), r);
         assertEquals(List.of("curl -fsSL " + CATALOG_QUERY, cdnCall()), anonymousCalls());
+        assertFalse(Files.exists(unrunnableFile()), "a Zulu JRE that runs is never recorded as one that cannot");
     }
 
     @Test
@@ -111,6 +113,7 @@ class InstallerJavaScriptTest extends UnitTest {
                 + "java=" + host + "/java\n"), install(host, Map.of()));
         assertEquals(List.of("curl -fsSL " + CATALOG_QUERY), calls());
         assertFalse(Files.exists(tmp.resolve("home/jre")));
+        assertFalse(Files.exists(unrunnableFile()), "Azul's catalog, not this file, says it has no JRE for the system");
     }
 
     @Test
@@ -188,6 +191,7 @@ class InstallerJavaScriptTest extends UnitTest {
                 + "), so JClaw runs on Java 25 at " + host + "/java. Please report this.\n"
                 + "java=" + host + "/java\n"), install(host, Map.of()));
         assertFalse(Files.exists(tmp.resolve("home/jre")), "a JRE left at jre/ would be the one jclaw.sh starts on");
+        assertEquals("Zulu\n", Files.readString(unrunnableFile()), "Settings offers no switch to it");
     }
 
     @Test
@@ -257,7 +261,8 @@ class InstallerJavaScriptTest extends UnitTest {
             assertTrue(m.find(), "install.sh no longer defines " + name);
             harness.append(m.group());
         }
-        harness.append("check_java\necho \"java=$(command -v java)\"\n");
+        // The install runs both, with the bundle's extract between them.
+        harness.append("check_java\nrecord_unrunnable_jre\necho \"java=$(command -v java)\"\n");
 
         if (!Files.exists(tmp.resolve("catalog.json"))) catalog(catalogFor(sha(jreTarball())));
         Files.write(tmp.resolve(TARBALL), jreTarball());
@@ -309,6 +314,11 @@ class InstallerJavaScriptTest extends UnitTest {
         var out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
         assertEquals(0, p.waitFor());
         return out;
+    }
+
+    /** Where Settings reads which vendors' Java cannot run here. */
+    private Path unrunnableFile() {
+        return tmp.resolve("home/jclaw/data/java-runtime.unrunnable");
     }
 
     private String managedHome() {

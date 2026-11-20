@@ -251,6 +251,7 @@ detect_os() {
 # system change — uninstall is just `rm -rf "$JCLAW_HOME"`.
 check_java() {
     HOST_JAVA=''
+    JRE_UNRUNNABLE=''
     _host_java_home=${JAVA_HOME:-}
     if java_ok; then
         if upgrading || [ -n "$JCLAW_NO_JRE" ] || [ -z "$ARCH" ]; then
@@ -279,6 +280,7 @@ check_java() {
             if ! "$JAVA_HOME/bin/java" -version >/dev/null 2>&1; then
                 # A java that does not run at all was built for another C library or CPU.
                 _why="the Zulu JRE in $JAVA_HOME cannot run on this system ($AZUL_OS, $(uname -m))"
+                JRE_UNRUNNABLE=Zulu
             elif [ -n "$JAVA_LACKS_MODULE" ]; then
                 _why="the Zulu JRE in $JAVA_HOME lacks the $JAVA_MODULE module"
             else
@@ -300,6 +302,14 @@ check_java() {
         return
     fi
     java_missing "$REASON"
+}
+
+# Once the bundle is in $APP_DIR: Settings offers no switch to a vendor this file lists, one whose Java
+# check_java found cannot run here. jclaw.sh adds to it when a start finds the same of a downloaded Java.
+record_unrunnable_jre() {
+    [ -n "${JRE_UNRUNNABLE:-}" ] || return 0
+    { mkdir -p "$APP_DIR/data" && printf '%s\n' "$JRE_UNRUNNABLE" >"$APP_DIR/data/java-runtime.unrunnable"; } 2>/dev/null \
+        || warn "couldn't write $APP_DIR/data/java-runtime.unrunnable, so Settings may offer a switch to $JRE_UNRUNNABLE."
 }
 
 # An existing install is upgraded in place, by its own jclaw.sh, rather than replaced.
@@ -676,6 +686,7 @@ extract "$ZIP" "$JCLAW_HOME"
 [ -d "$APP_DIR" ] || die "extract did not produce $APP_DIR — the archive layout may have changed."
 chmod +x "$APP_DIR/jclaw.sh" "$APP_DIR/play" "$APP_DIR/gradlew" 2>/dev/null || true
 write_manifest
+record_unrunnable_jre
 substep "extracted"
 
 # Convenience shim so `jclaw` works from anywhere. Delegated to the bundle's own

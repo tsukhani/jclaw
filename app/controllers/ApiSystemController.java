@@ -420,7 +420,8 @@ public class ApiSystemController extends Controller {
      * Temurin. Returns 202 while the download runs in this JVM; the GET reports its progress. 400 for
      * another vendor. 409 when there is nothing this install may download: a source checkout, a
      * container, install.ps1's WSL route, a download already running or staged, no newer patch, a
-     * vendor with no JRE for this system, or a switch that would go back to an older Java.
+     * vendor with no JRE for this system or whose Java did not start on it, or a switch that would go
+     * back to an older Java.
      */
     @AgentAccess(value = OPERATOR_ONLY, reason = "downloads a Java runtime that the next start installs")
     public static void stageJavaRuntime() {

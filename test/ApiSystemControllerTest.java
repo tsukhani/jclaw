@@ -699,6 +699,35 @@ class ApiSystemControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aSwitchToAVendorWhoseJavaDidNotStartOnThisSystemIsRefusedNamingTheSystemAndTheOtherIsStaged()
+            throws Exception {
+        login();
+        Files.createDirectories(tmp.resolve("jclaw/data"));
+        Files.writeString(tmp.resolve("jclaw/data/java-runtime.unrunnable"), "Zulu\n");
+        JavaRuntimeService.setEnvironmentForTest(new JavaRuntimeService.Environment(tmp.resolve("jclaw"),
+                Files.createDirectories(tmp.resolve("nix/store/openjdk-headless-25")), "25.0.3", "N/A", "Linux",
+                "aarch64", false));
+        JavaRuntimeService.setCatalogForTest(v -> new JavaRuntimeService.Answer(
+                v == JavaRuntimeService.Vendor.TEMURIN ? temurin("25.0.5.1") : release("25.0.5.1"), null));
+        JavaRuntimeService.setStagerForTest((r, home, p) -> stagings.add(r));
+        var zulu = "Zulu cannot run on this system (Linux aarch64): it did not start when JClaw tried it here.";
+
+        var offered = json(GET("/api/system/java-runtime"));
+        assertEquals("[{\"vendor\":\"Zulu\",\"version\":null,\"refusal\":\"" + zulu + "\"},"
+                + "{\"vendor\":\"Temurin\",\"version\":\"25.0.5.1\",\"refusal\":null}]", offered.get("switches").toString());
+        for (var body : List.of("{}", "{\"vendor\": \"Zulu\"}")) {
+            var refused = POST("/api/system/java-runtime", "application/json", body);
+            assertEquals(409, refused.status.intValue(), body);
+            assertEquals(zulu, json(refused).get("message").getAsString(), body);
+        }
+        assertEquals(0, stagings.size());
+
+        assertEquals(202, POST("/api/system/java-runtime", "application/json", "{\"vendor\": \"Temurin\"}").status.intValue());
+        waitUntil(() -> !JavaRuntimeService.CURRENT.active());
+        assertEquals(List.of(temurin("25.0.5.1")), stagings);
+    }
+
+    @Test
     void onTemurinThePanelAsksAdoptiumAndOffersItsPatchWithItsOwnNotesAndTheSwitchBackToZulu() throws Exception {
         login();
         Files.createDirectories(tmp.resolve("jclaw/conf"));
