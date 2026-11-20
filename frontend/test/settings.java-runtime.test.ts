@@ -126,6 +126,8 @@ function builtIn(over: Record<string, unknown> = {}) {
     downloadError: null,
     lastStart: null,
     lastStartAt: null,
+    checkFailure: null,
+    checkFailureAt: null,
     rebuildsStartupCache: true,
     switches: [],
     ...over,
@@ -273,6 +275,29 @@ describe('SettingsJavaRuntimePanel — what it reports', () => {
     const c = await mounted()
 
     expect(c.find('[data-testid="java-runtime-last-start"]').exists()).toBe(false)
+  })
+
+  it('shows the daily check\'s last failure beside the error of its own download', async () => {
+    const at = '2026-11-20T09:00:00Z'
+    runtime = builtIn({
+      downloadError: 'Java 25.0.5 could not be downloaded: checksum mismatch',
+      checkFailure: 'Java 25.0.5 could not be downloaded: the download came from objects.githubusercontent.com, '
+        + 'and JClaw downloads Temurin only from github.com/adoptium or release-assets.githubusercontent.com.',
+      checkFailureAt: at,
+    })
+    const c = await mounted()
+
+    expect(c.find('[data-testid="java-runtime-daily-check"]').text()).toBe('Last daily check: Java 25.0.5 could not be '
+      + 'downloaded: the download came from objects.githubusercontent.com, and JClaw downloads Temurin only from '
+      + `github.com/adoptium or release-assets.githubusercontent.com. (${new Date(at).toLocaleString()})`)
+    expect(c.find('[role="status"]').text()).toBe('Java 25.0.5 could not be downloaded: checksum mismatch')
+    expect(panelButton(c, 'Download Java 25.0.5')).toBeTruthy()
+  })
+
+  it('says nothing about the daily check while it has not failed', async () => {
+    const c = await mounted()
+
+    expect(c.find('[data-testid="java-runtime-daily-check"]').exists()).toBe(false)
   })
 
   it('shows why the last download failed and offers it again', async () => {

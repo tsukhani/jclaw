@@ -20,7 +20,8 @@ public class JavaRuntimePatchJob extends PeriodicJob {
     public void doJob() {
         // The suite runs from a checkout, and a test's environment seam must never reach a vendor's catalog from here.
         if (Play.runningInTestMode()) return;
-        JavaRuntimePatchCheck.run(JavaRuntimeService.environment(), () -> JavaRuntimeService.latest(true),
-                JavaRuntimeService.CURRENT, JavaRuntimeService::download, Agent.MAIN_AGENT_NAME);
+        var env = JavaRuntimeService.environment();
+        JavaRuntimePatchCheck.run(env, () -> JavaRuntimeService.check(env), JavaRuntimeService.CURRENT,
+                JavaRuntimeService::download, Agent.MAIN_AGENT_NAME);
     }
 }

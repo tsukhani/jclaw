@@ -22,7 +22,8 @@ import java.util.List;
  * {@code payloadType="reminder"} fires on the {@code web} channel,
  * {@link services.ReminderDispatcher} writes one of these instead of
  * appending a {@link Message} to a Conversation — and
- * {@link services.JavaRuntimePatchCheck} writes one, with a {@link #title}, for a newer Java patch.
+ * {@link services.JavaRuntimePatchCheck} writes one, with a {@link #title}, for a newer Java patch
+ * or a patch check that keeps failing.
  *
  * <p>Telegram-channel reminders bypass this entity entirely — they go
  * straight to the user's bot binding via {@link channels.TelegramChannel#sendText}.

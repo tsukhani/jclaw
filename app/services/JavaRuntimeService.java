@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -306,6 +307,29 @@ public final class JavaRuntimeService {
     public record Answer(@Nullable Release release, @Nullable String why) {}
 
     /**
+     * One query of a catalog past its cache, for the daily check: the answer, the last good one when the catalog
+     * could not be reached, and then why it could not, or {@code failure} null when it answered.
+     */
+    public record Checked(Answer answer, @Nullable String failure) {}
+
+    /**
+     * A download JClaw turned down: its message for the log, and {@link #inWords()} for the operator's notice.
+     */
+    public static final class RefusedException extends IOException {
+        private final String inWords;
+
+        RefusedException(String message, String inWords) {
+            super(message);
+            this.inWords = inWords;
+        }
+
+        /** Why, in plain words that follow "could not be downloaded:". */
+        public String inWords() {
+            return inWords;
+        }
+    }
+
+    /**
      * A switch to {@code vendor}'s Java {@code version} that the panel offers, or with a {@code refusal}, does not,
      * saying why. Each is judged by {@link #stageable}, so the panel never offers a switch the POST refuses.
      */
@@ -447,6 +471,12 @@ public final class JavaRuntimeService {
             if (!refresh && failed != null && Duration.between(failed, now).compareTo(RETRY_AFTER) < 0) {
                 return c != null ? c.answer() : unreachable(vendor);
             }
+            return check(catalog).answer();
+        }
+
+        /** As {@link #answer} with {@code refresh}, saying why when the catalog could not be reached. */
+        public Checked check(Catalog catalog) {
+            var c = cached;
             Answer answer;
             try {
                 answer = new Answer(catalog.fetch(), null);
@@ -456,11 +486,12 @@ public final class JavaRuntimeService {
                 failedAt = AppClock.now();
                 EventLogger.warn(CATEGORY, "Could not check " + vendor.owner + "'s catalog for a newer Java: "
                         + e.getMessage());
-                return c != null ? c.answer() : unreachable(vendor);
+                return new Checked(c != null ? c.answer() : unreachable(vendor),
+                        Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
             }
             failedAt = null;
             cached = new Cached(answer, AppClock.now());
-            return answer;
+            return new Checked(answer, null);
         }
     }
 
@@ -575,8 +606,20 @@ public final class JavaRuntimeService {
     public static Answer answer(Environment env, Vendor vendor, int major, boolean refresh) {
         var test = catalogOverride;
         if (test != null) return test.apply(vendor);
-        return LOOKUPS.computeIfAbsent(vendor.name() + ":" + major, _ -> new Lookup(vendor))
-                .answer(refresh, () -> fetchLatest(env, vendor, major));
+        return lookup(vendor, major).answer(refresh, () -> fetchLatest(env, vendor, major));
+    }
+
+    /** The daily check's query: {@link #latest} past the cache, saying why when the catalog could not be reached. */
+    public static Checked check(Environment env) {
+        var vendor = running(env);
+        var test = catalogOverride;
+        if (test != null) return new Checked(test.apply(vendor), null);
+        int major = major(env.javaVersion());
+        return lookup(vendor, major).check(() -> fetchLatest(env, vendor, major));
+    }
+
+    private static Lookup lookup(Vendor vendor, int major) {
+        return LOOKUPS.computeIfAbsent(vendor.name() + ":" + major, _ -> new Lookup(vendor));
     }
 
     /**
@@ -1135,8 +1178,9 @@ public final class JavaRuntimeService {
         var vendor = release.vendor();
         var url = HttpUrl.parse(release.url());
         if (url == null || !vendor.allowsLink(url)) {
-            throw new IOException("refusing " + release.url() + ": Java is only downloaded over HTTPS from "
-                    + vendor.linkPlace());
+            throw new RefusedException("refusing " + release.url() + ": Java is only downloaded over HTTPS from "
+                    + vendor.linkPlace(), vendor.owner + "'s catalog links it to " + release.url() + ", and JClaw "
+                    + "downloads " + vendor.label + " only from " + vendor.linkPlace() + " over HTTPS");
         }
         var sha = release.sha256();
         if (sha == null || !SHA256.matcher(sha).matches()) {
@@ -1179,8 +1223,9 @@ public final class JavaRuntimeService {
             // Redirects are followed, so the host is checked again where the bytes come from.
             var landed = response.request().url();
             if (!vendor.allowsLanding(landed)) {
-                throw new IOException("refusing a redirect to " + landed.host() + ": Java is only downloaded from "
-                        + vendor.landingPlaces());
+                throw new RefusedException("refusing a redirect to " + landed.host() + ": Java is only downloaded "
+                        + "from " + vendor.landingPlaces(), "the download came from " + landed.host() + ", and JClaw "
+                        + "downloads " + vendor.label + " only from " + vendor.landingPlaces());
             }
             if (!response.isSuccessful()) throw new IOException("HTTP " + response.code() + " fetching " + url);
             var body = response.body();
@@ -1203,8 +1248,9 @@ public final class JavaRuntimeService {
             }
             var actual = HexFormat.of().formatHex(digest.digest());
             if (!actual.equals(sha256)) {
-                throw new IOException("checksum mismatch: " + vendor.owner + "'s catalog gives " + sha256
-                        + ", the download is " + actual);
+                throw new RefusedException("checksum mismatch: " + vendor.owner + "'s catalog gives " + sha256
+                        + ", the download is " + actual, "the download does not match the SHA-256 that "
+                        + vendor.owner + "'s catalog gives for it");
             }
         }
     }

@@ -25,6 +25,7 @@ import services.JavaRuntimeService.Download;
 import services.JavaRuntimeService.Environment;
 import services.JavaRuntimeService.Vendor;
 import services.Tx;
+import utils.AppClock;
 import utils.HttpFactories;
 
 import java.io.IOException;
@@ -34,6 +35,9 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -72,6 +76,8 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
     private final String recipient = "jf536-operator";
     private final List<String> requests = new ArrayList<>();
+    /** The wall clock each run reads. */
+    private Instant now = Instant.parse("2026-11-20T09:00:00Z");
 
     @BeforeEach
     void setup() {
@@ -221,11 +227,7 @@ class JavaRuntimePatchCheckTest extends UnitTest {
         assertEquals(List.of(CATALOG_PATH), requests);
 
         var env = builtIn("25.0.4");
-        Interceptor down = chain -> {
-            requests.add(path(chain.request()));
-            return answer(chain.request(), 503, "unavailable".getBytes(StandardCharsets.UTF_8));
-        };
-        check(env, new OkHttpClient.Builder().addInterceptor(down).build(), new Download());
+        check(env, catalogDown(), new Download());
 
         assertEquals(List.of(CATALOG_PATH, CATALOG_PATH), requests);
         assertEquals(List.of(), notices());
@@ -503,6 +505,191 @@ class JavaRuntimePatchCheckTest extends UnitTest {
         assertEquals(newest32, JavaRuntimePatchCheck.handled(env.app()));
     }
 
+    @Test
+    void aDownloadThatFailsOnTwoRunsInARowIsToldOnceNamingTheBuildAndTheReason() throws IOException {
+        var env = builtIn("25.0.4");
+        var down = azul(catalog(true, sha(JRE)), 503);
+
+        check(env, down, new Download());
+
+        assertEquals(List.of(), notices());
+        assertEquals(new JavaRuntimePatchCheck.Failure("Java 25.0.5.1 could not be downloaded: HTTP 503 fetching https://"
+                + CDN_PATH + ".", now), JavaRuntimePatchCheck.lastFailure(env.app()));
+        // The count is all a restart has to go on until the next run.
+        assertEquals(List.of("java-runtime.failures"), listing(env.app().resolve("data")));
+
+        now = now.plusSeconds(86_400);
+        check(env, down, new Download());
+        check(env, down, new Download());
+
+        assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, could not be downloaded on "
+                + "two daily checks in a row: HTTP 503 fetching https://" + CDN_PATH + ". JClaw tries again at each "
+                + "daily check, or try it now from Settings > Maintenance > Java runtime." + LINK), notices());
+        assertEquals(new JavaRuntimePatchCheck.Failure("Java 25.0.5.1 could not be downloaded: HTTP 503 fetching https://"
+                + CDN_PATH + ".", now), JavaRuntimePatchCheck.lastFailure(env.app()));
+        assertEquals(List.of(CATALOG_PATH, CDN_PATH, CATALOG_PATH, CDN_PATH, CATALOG_PATH, CDN_PATH), requests);
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
+        assertFalse(Files.exists(tmp.resolve("jre.staged")));
+    }
+
+    @Test
+    void aTemurinDownloadThatLandsOutsideItsHostsIsToldNamingTheHostItLandedOn() throws IOException {
+        var env = temurinBuiltIn("25.0.5");
+        var moved = adoptium(temurinCatalog(sha(JRE)), "objects.githubusercontent.com");
+
+        var events = EventLogger.captureForTest(() -> check(env, moved, new Download()));
+        check(env, moved, new Download());
+
+        assertEquals(List.of("INFO Downloading Temurin 25.0.5.1 for the next start to install",
+                "WARN Java runtime download failed: refusing a redirect to objects.githubusercontent.com: Java is only "
+                        + "downloaded from github.com/adoptium or release-assets.githubusercontent.com"),
+                runtimeEvents(events));
+        assertEquals(List.of("Java runtime | Java 25.0.5.1 could not be downloaded on two daily checks in a row: the "
+                + "download came from objects.githubusercontent.com, and JClaw downloads Temurin only from "
+                + "github.com/adoptium or release-assets.githubusercontent.com. JClaw tries again at each daily check, "
+                + "or try it now from Settings > Maintenance > Java runtime." + TEMURIN_LINK), notices());
+        assertFalse(Files.exists(tmp.resolve("jre.staged")));
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void aZuluCatalogThatLinksOutsideItsHostIsToldNamingTheLink() throws IOException {
+        var env = builtIn("25.0.4");
+        var link = "https://cdn2.azul.com/zulu/bin/" + ARCHIVE;
+        var moved = azul(linkedTo(catalog(true, sha(JRE)), link), 200);
+
+        check(env, moved, new Download());
+        check(env, moved, new Download());
+
+        assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, could not be downloaded on "
+                + "two daily checks in a row: Azul's catalog links it to " + link + ", and JClaw downloads Zulu only "
+                + "from cdn.azul.com over HTTPS. JClaw tries again at each daily check, or try it now from Settings > "
+                + "Maintenance > Java runtime." + LINK), notices());
+        assertEquals(List.of(CATALOG_PATH, CATALOG_PATH), requests);
+    }
+
+    @Test
+    void aNewerBuildThatAlsoFailsIsToldOfItsOwn() throws IOException {
+        var env = builtIn(VERSION, "Zulu25.38+201-CA");
+        var first = azul(respun(catalog(true, AZUL_SHA), 203), 200);
+        var newer = azul(respun(catalog(true, AZUL_SHA), 205), 200);
+
+        check(env, first, new Download());
+        check(env, first, new Download());
+        check(env, newer, new Download());
+
+        assertEquals(1, notices().size());
+
+        check(env, newer, new Download());
+        check(env, newer, new Download());
+
+        var reason = " could not be downloaded on two daily checks in a row: the download does not match the SHA-256 "
+                + "that Azul's catalog gives for it. JClaw tries again at each daily check, or try it now from Settings "
+                + "> Maintenance > Java runtime.";
+        assertEquals(List.of("Java runtime | Zulu 25.38.203, a security and bug-fix release," + reason + LINK,
+                "Java runtime | Zulu 25.38.205, a security and bug-fix release," + reason + LINK), notices());
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void aDownloadThatSucceedsAfterOneFailureClearsIt() throws IOException {
+        var env = builtIn("25.0.4");
+        check(env, azul(catalog(true, sha(JRE)), 503), new Download());
+        check(env, azul(catalog(true, sha(JRE)), 200), new Download());
+
+        assertNull(JavaRuntimePatchCheck.lastFailure(env.app()));
+        assertEquals(List.of("java-runtime.notified"), listing(env.app().resolve("data")));
+
+        assertTrue(JavaRuntimePatchCheck.cancel(env, new Download()));
+        check(env, azul(respun(catalog(true, sha(JRE))), 503), new Download());
+
+        assertEquals(List.of("Java runtime | Java 25.0.5.1, a security and bug-fix release, is downloaded and installs "
+                + "the next time JClaw restarts. Restart from Settings > Maintenance > Java runtime when it suits you."
+                + LINK), notices());
+        assertEquals(new JavaRuntimePatchCheck.Failure("Java 25.0.5.1 could not be downloaded: HTTP 503 fetching "
+                + "https://cdn.azul.com/zulu/bin/" + RESPIN + ".", now), JavaRuntimePatchCheck.lastFailure(env.app()));
+    }
+
+    @Test
+    void aCatalogThatCannotBeCheckedOnThreeRunsInARowIsToldOnceAndAgainAfterACheckSucceeds() throws IOException {
+        var env = builtIn(VERSION);
+        var down = catalogDown();
+        var up = azul(catalog(true, sha(JRE)), 200);
+        var told = "Java runtime | JClaw couldn't check Azul's catalog for a newer Java on three daily checks in a row, "
+                + "so it cannot tell whether Java 25.0.5.1 has a newer patch. The last check failed with: HTTP 503 from "
+                + "Azul's catalog. JClaw keeps checking once a day. | null null";
+
+        check(env, down, new Download());
+        check(env, down, new Download());
+
+        assertEquals(List.of(), notices());
+        assertEquals(new JavaRuntimePatchCheck.Failure("Couldn't check Azul's catalog for a newer Java: HTTP 503 from "
+                + "Azul's catalog.", now), JavaRuntimePatchCheck.lastFailure(env.app()));
+
+        check(env, down, new Download());
+        check(env, down, new Download());
+
+        assertEquals(List.of(told), notices());
+
+        check(env, up, new Download());
+
+        assertNull(JavaRuntimePatchCheck.lastFailure(env.app()));
+
+        check(env, down, new Download());
+        check(env, down, new Download());
+        check(env, down, new Download());
+
+        assertEquals(List.of(told, told), notices());
+        assertEquals(List.of(), JavaRuntimePatchCheck.handled(env.app()));
+    }
+
+    @Test
+    void aCatalogCheckThatSucceedsBetweenTwoFailuresStartsTheCountAgain() throws IOException {
+        var env = builtIn(VERSION);
+        var down = catalogDown();
+
+        check(env, down, new Download());
+        check(env, azul(catalog(true, sha(JRE)), 200), new Download());
+        check(env, down, new Download());
+        check(env, down, new Download());
+
+        assertEquals(List.of(), notices());
+    }
+
+    @Test
+    void aHostJavaIsToldOnlyThatItsCatalogCannotBeChecked() throws IOException {
+        var javaHome = Files.createDirectories(tmp.resolve("usr/lib/jvm/java-25"));
+        var env = new Environment(app(), javaHome, "25.0.4", "Ubuntu", "Linux", "amd64", false);
+        var down = catalogDown();
+
+        for (int run = 0; run < 4; run++) check(env, down, new Download());
+
+        assertEquals(List.of("Java runtime | JClaw couldn't check Azul's catalog for a newer Java on three daily checks "
+                + "in a row, so it cannot tell whether Java 25.0.4 has a newer patch. The last check failed with: HTTP "
+                + "503 from Azul's catalog. JClaw keeps checking once a day. | null null"), notices());
+        assertEquals(List.of(CATALOG_PATH, CATALOG_PATH, CATALOG_PATH, CATALOG_PATH), requests);
+    }
+
+    @Test
+    void aCatalogListingNoJavaForThisSystemFailsTheCheckOnlyOnTheBuiltInJava() throws IOException {
+        var javaHome = Files.createDirectories(tmp.resolve("usr/lib/jvm/java-25"));
+        var host = new Environment(app(), javaHome, "25.0.4", "Ubuntu", "Linux", "amd64", false);
+        var none = azul("[]", 200);
+
+        for (int run = 0; run < 3; run++) check(host, none, new Download());
+
+        assertEquals(List.of(), notices());
+        assertNull(JavaRuntimePatchCheck.lastFailure(host.app()));
+
+        var installed = builtIn("25.0.4");
+        for (int run = 0; run < 3; run++) check(installed, none, new Download());
+
+        assertEquals(List.of("Java runtime | JClaw couldn't check Azul's catalog for a newer Java on three daily checks "
+                + "in a row, so it cannot tell whether Java 25.0.4 has a newer patch. The last check failed with: Azul's "
+                + "catalog lists no Java 25 runtime for linux/x64. JClaw keeps checking once a day. | null null"),
+                notices());
+    }
+
     // --- helpers ---
 
     /** A finished download in {@code jre.staged/}, as the Settings button leaves it. */
@@ -518,16 +705,32 @@ class JavaRuntimePatchCheckTest extends UnitTest {
                 + archive + "\n" + (vendor == null ? "" : "vendor=" + vendor + "\n"));
     }
 
+    /** {@code payload} with {@link #ARCHIVE}'s download at {@code url}. */
+    private static String linkedTo(String payload, String url) {
+        var entries = JsonParser.parseString(payload).getAsJsonArray();
+        for (var el : entries) {
+            var o = el.getAsJsonObject();
+            if (ARCHIVE.equals(o.get("name").getAsString())) o.addProperty("download_url", url);
+        }
+        return entries.toString();
+    }
+
     /** {@code payload} with {@link #ARCHIVE} respun as {@link #RESPIN}: a newer Zulu build of the same Java. */
     private static String respun(String payload) {
+        return respun(payload, 203);
+    }
+
+    /** {@code payload} with {@link #ARCHIVE} respun as Zulu 25.38.{@code build} of the same Java 25.0.5.1. */
+    private static String respun(String payload, int build) {
+        var archive = "zulu25.38." + build + "-ca-jre25.0.5.1-linux_x64.tar.gz";
         var entries = JsonParser.parseString(payload).getAsJsonArray();
         for (var el : entries) {
             var o = el.getAsJsonObject();
             if (!ARCHIVE.equals(o.get("name").getAsString())) continue;
-            o.addProperty("name", RESPIN);
-            o.addProperty("download_url", "https://cdn.azul.com/zulu/bin/" + RESPIN);
+            o.addProperty("name", archive);
+            o.addProperty("download_url", "https://cdn.azul.com/zulu/bin/" + archive);
             var distro = new JsonArray();
-            for (int part : new int[] {25, 38, 203, 0}) distro.add(part);
+            for (int part : new int[] {25, 38, build, 0}) distro.add(part);
             o.add("distro_version", distro);
         }
         return entries.toString();
@@ -536,9 +739,18 @@ class JavaRuntimePatchCheckTest extends UnitTest {
 
     private void check(Environment env, OkHttpClient azul, Download progress) {
         var lookup = new JavaRuntimeService.Lookup();
-        HttpFactories.runWith(azul, () -> JavaRuntimePatchCheck.run(env,
-                () -> lookup.latest(true, () -> JavaRuntimeService.fetchLatest(env)), progress,
-                JavaRuntimeService::download, recipient));
+        AppClock.runWith(Clock.fixed(now, ZoneOffset.UTC), () -> HttpFactories.runWith(azul,
+                () -> JavaRuntimePatchCheck.run(env, () -> lookup.check(() -> JavaRuntimeService.fetchLatest(env)),
+                        progress, JavaRuntimeService::download, recipient)));
+    }
+
+    /** Azul's catalog answering 503, as when it is down. */
+    private OkHttpClient catalogDown() {
+        Interceptor down = chain -> {
+            requests.add(path(chain.request()));
+            return answer(chain.request(), 503, "unavailable".getBytes(StandardCharsets.UTF_8));
+        };
+        return new OkHttpClient.Builder().addInterceptor(down).build();
     }
 
     /** {@code <tmp>/jclaw} on {@code <tmp>/jre}, the installer's layout, running {@code version}. */
@@ -573,12 +785,17 @@ class JavaRuntimePatchCheckTest extends UnitTest {
      * {@link #JRE}, as it does for every Adoptium download. Any other host fails.
      */
     private OkHttpClient adoptium(String payload) {
+        return adoptium(payload, "release-assets.githubusercontent.com");
+    }
+
+    /** As {@link #adoptium(String)}, GitHub redirecting the binary to {@code assetHost}. */
+    private OkHttpClient adoptium(String payload, String assetHost) {
         Interceptor canned = chain -> {
             var request = chain.request();
             requests.add(path(request));
             return switch (request.url().host()) {
                 case "api.adoptium.net" -> answer(request, 200, payload.getBytes(StandardCharsets.UTF_8));
-                case "github.com" -> answer(request.newBuilder().url("https://release-assets.githubusercontent.com/"
+                case "github.com" -> answer(request.newBuilder().url("https://" + assetHost + "/"
                         + "github-production-release-asset/901810329/19a11c1b").build(), 200, JRE);
                 default -> answer(request, 500, "unexpected".getBytes(StandardCharsets.UTF_8));
             };

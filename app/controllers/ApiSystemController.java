@@ -332,6 +332,9 @@ public class ApiSystemController extends Controller {
      * @param lastStart            jclaw.sh's line about what the last start did with a staged runtime,
      *                             or null when the last start had none to install
      * @param lastStartAt          when that line was written (ISO-8601), or null
+     * @param checkFailure         why the daily check last failed, to check the catalog or to download a patch,
+     *                             or null when nothing failed since a run last succeeded
+     * @param checkFailureAt       when it failed (ISO-8601), or null
      * @param rebuildsStartupCache true when the first start on a new runtime rebuilds the AOT cache:
      *                             false on Windows, which has none, and while it is switched off in
      *                             Settings or by {@code JCLAW_AOT=off}
@@ -352,6 +355,7 @@ public class ApiSystemController extends Controller {
                                        @Nullable String downloadingVersion, @Nullable String downloadingVendor,
                                        @Nullable Integer downloadPercent, @Nullable String downloadError,
                                        @Nullable String lastStart, @Nullable String lastStartAt,
+                                       @Nullable String checkFailure, @Nullable String checkFailureAt,
                                        boolean rebuildsStartupCache, List<JavaRuntimeSwitch> switches) {}
 
     /**
@@ -382,6 +386,7 @@ public class ApiSystemController extends Controller {
         boolean downloading = progress.active();
         var target = downloading ? progress.target() : null;
         var last = JavaRuntimeService.lastStart(env.app());
+        var checkFailure = JavaRuntimePatchCheck.lastFailure(env.app());
         var distribution = env.distribution();
         // The panel's one-second download poll lands here, so it never waits on the other vendor's catalog.
         List<JavaRuntimeSwitch> switches = downloading || staged != null ? List.of()
@@ -400,6 +405,8 @@ public class ApiSystemController extends Controller {
                 target == null ? null : target.version(), target == null ? null : target.vendor().label,
                 downloading ? progress.currentPercent() : null, progress.lastError(),
                 last == null ? null : last.line(), last == null ? null : last.at().toString(),
+                checkFailure == null ? null : checkFailure.line(),
+                checkFailure == null ? null : checkFailure.at().toString(),
                 !env.windows() && RestartService.aotCacheState().enabled()
                         && !"off".equals(System.getenv("JCLAW_AOT")),
                 switches)));

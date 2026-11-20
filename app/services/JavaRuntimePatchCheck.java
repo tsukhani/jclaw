@@ -3,27 +3,35 @@ package services;
 import models.Agent;
 import models.Notification;
 import org.jspecify.annotations.Nullable;
+import services.JavaRuntimeService.Checked;
 import services.JavaRuntimeService.Download;
 import services.JavaRuntimeService.Environment;
 import services.JavaRuntimeService.Kind;
 import services.JavaRuntimeService.Release;
 import services.JavaRuntimeService.Stager;
+import utils.AppClock;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * The daily look for a newer patch of the Java JClaw runs on. On the Java the installer set up, it downloads the
  * patch into {@code jre.staged/} exactly as Settings → Maintenance → Java runtime does, for the next start to
  * install; on a Java JClaw did not install it only tells the operator. Either way the operator hears once per
- * build, through a {@link Notification}. Nothing here stops or restarts JClaw. A container's image brings its
- * Java and a source checkout runs its developer's, so neither is looked at.
+ * build, through a {@link Notification}, and once when the check keeps failing: the same build failing to download
+ * on two runs in a row, or the catalog on three. Nothing here stops or restarts JClaw. A container's image brings
+ * its Java and a source checkout runs its developer's, so neither is looked at.
  */
 public final class JavaRuntimePatchCheck {
 
@@ -37,45 +45,81 @@ public final class JavaRuntimePatchCheck {
      */
     public static final String HANDLED_FILE = "java-runtime.notified";
 
+    /**
+     * Under {@code <app>/data/}: how many runs in a row could not check the catalog or download one build, whether
+     * the operator was told of each, and the last failure, for the panel. Counted by run, so a restart between two
+     * runs keeps the counts. Absent while nothing fails.
+     */
+    public static final String FAILURES_FILE = "java-runtime.failures";
+
     public static final String TITLE = "Java runtime";
 
     private static final String CATEGORY = "java-runtime";
     // Years of patches; the oldest falls off first.
     private static final int HANDLED_KEPT = 32;
+    // One failed run can be a network blip; the notices name these counts in words.
+    private static final int DOWNLOAD_RUNS = 2;
+    private static final int CATALOG_RUNS = 3;
+    private static final int REASON_MAX_CHARS = 300;
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final String RESTART_HINT = " and installs the next time JClaw restarts. "
             + "Restart from Settings > Maintenance > Java runtime when it suits you.";
+
+    /** The daily check's last failure, kept until a later run succeeds, and when it happened. */
+    public record Failure(String line, Instant at) {}
 
     private JavaRuntimePatchCheck() {}
 
     /**
-     * One look. A download that fails, or a {@code recipient} that does not exist yet, records nothing, so the
-     * next run tries again.
+     * One look. A download that fails, or a {@code recipient} that does not exist yet, marks nothing handled, so
+     * the next run tries again.
      *
-     * @param latest    the newest patch of the running major from the running vendor's catalog, or null when
-     *                  it cannot be reached
+     * @param latest    the running vendor's catalog asked for the newest patch of the running major, past its cache
      * @param recipient the agent the notification is filed under; the job passes main, which the operator's
      *                  notification bar shows
      */
-    public static void run(Environment env, Supplier<@Nullable Release> latest, Download progress, Stager stager,
+    public static void run(Environment env, Supplier<Checked> latest, Download progress, Stager stager,
                            String recipient) {
         if (env.container() || JavaRuntimeService.sourceCheckout(env.app())) return;
-        var release = latest.get();
-        // stageable's own test, so what the panel offers and what this check stages never part.
-        if (release == null || !JavaRuntimeService.isNewer(release, env)) return;
-        if (handled(env.app()).contains(release.archive())) return;
-        // Asked before a download, so a patch is never staged with no one to tell.
-        if (Tx.run(() -> Agent.findByName(recipient)) == null) {
-            EventLogger.warn(CATEGORY, "No agent '" + recipient + "' to tell about Java " + release.version());
-            return;
-        }
-
-        var message = JavaRuntimeService.kind(env) == Kind.BUILT_IN
-                ? builtIn(env, release, progress, stager)
-                : named(env, release) + " is available for the Java JClaw runs on, Java " + env.javaVersion()
-                        + " at " + env.javaHome() + ". Update that Java the way you installed it.";
-        if (message != null && notify(recipient, message, release)) {
-            EventLogger.info(CATEGORY, "Told the operator about Java " + release.version());
-            markHandled(env.app(), release.archive());
+        var checked = latest.get();
+        boolean builtIn = JavaRuntimeService.kind(env) == Kind.BUILT_IN;
+        var failures = Failures.read(env.app());
+        try {
+            catalogChecked(env, checked, builtIn, failures, recipient);
+            var release = checked.answer().release();
+            if (release == null) return;
+            // stageable's own test, so what the panel offers and what this check stages never part.
+            if (!JavaRuntimeService.isNewer(release, env) || handled(env.app()).contains(release.archive())) {
+                failures.settled();
+                return;
+            }
+            // Asked before a download, so a patch is never staged with no one to tell.
+            if (Tx.run(() -> Agent.findByName(recipient)) == null) {
+                EventLogger.warn(CATEGORY, "No agent '" + recipient + "' to tell about Java " + release.version());
+                return;
+            }
+            String message;
+            try {
+                message = builtIn
+                        ? builtIn(env, release, progress, stager)
+                        : named(env, release) + " is available for the Java JClaw runs on, Java " + env.javaVersion()
+                                + " at " + env.javaHome() + ". Update that Java the way you installed it.";
+            } catch (IOException | IllegalStateException e) {
+                downloadFailed(env, release, e, failures, recipient);
+                return;
+            }
+            if (message == null) {
+                // builtIn records a build Settings already staged; any other null leaves the counts as they are.
+                if (handled(env.app()).contains(release.archive())) failures.settled();
+                return;
+            }
+            failures.settled();
+            if (notify(recipient, message, release.notesUrl(), release.notesLabel())) {
+                EventLogger.info(CATEGORY, "Told the operator about Java " + release.version());
+                markHandled(env.app(), release.archive());
+            }
+        } finally {
+            failures.save(env.app());
         }
     }
 
@@ -103,8 +147,20 @@ public final class JavaRuntimePatchCheck {
         }
     }
 
-    /** On the installer's Java: stage {@code release} or say how to, or null when there is nothing to tell yet. */
-    private static @Nullable String builtIn(Environment env, Release release, Download progress, Stager stager) {
+    /** The last failure of this check, or null when none is recorded or a later run succeeded. */
+    public static @Nullable Failure lastFailure(Path app) {
+        var f = Failures.read(app);
+        return f.line == null || f.at == null ? null : new Failure(f.line, f.at);
+    }
+
+    /**
+     * On the installer's Java: stage {@code release} or say how to, or null when there is nothing to tell yet.
+     *
+     * @throws IOException           when the download or its check fails, which stageNow logged
+     * @throws IllegalStateException when stageable refuses it
+     */
+    private static @Nullable String builtIn(Environment env, Release release, Download progress, Stager stager)
+            throws IOException {
         var staged = JavaRuntimeService.staged(env.home());
         // A switch to the other vendor waits: the operator chose it, and a patch of the Java it leaves would undo it.
         if (staged != null && staged.vendor() != null && staged.vendor() != release.vendor()) return null;
@@ -135,29 +191,82 @@ public final class JavaRuntimePatchCheck {
         }
         try {
             JavaRuntimeService.stageNow(env, release, progress, stager);
-        } catch (IOException _) {
-            return null; // stageNow logged it, and nothing was staged
         } catch (IllegalStateException e) {
             EventLogger.warn(CATEGORY, "Java " + release.version() + " was not downloaded on its own: "
                     + e.getMessage());
-            return null;
+            throw e;
         }
         return named(env, release) + " is downloaded"
                 + (staged == null ? "" : " in place of Java " + staged.version()) + RESTART_HINT;
     }
 
-    // "Java 25.0.5.1, a security and bug-fix release," reads as one phrase; with no type it is the name alone. A
-    // respin of the running Java version differs only in its Zulu build, so it is named by that, as the panel does.
-    private static String named(Environment env, Release release) {
-        var build = release.build();
-        var name = build != null && env.build() != null
-                && JavaRuntimeService.compareVersions(release.version(), env.javaVersion()) == 0
-                ? "Zulu " + build : "Java " + release.version();
-        var words = JavaRuntimeService.releaseTypeInWords(release.releaseType());
-        return words == null ? name : name + ", " + words + ",";
+    private static void catalogChecked(Environment env, Checked checked, boolean builtIn, Failures failures,
+                                       String recipient) {
+        var answer = checked.answer();
+        var failure = checked.failure();
+        // The built-in Java came from this catalog, so one that now lists none for this system has stopped patching it.
+        if (failure == null && builtIn && answer.release() == null) {
+            failure = Objects.requireNonNullElse(answer.why(), "it gave no answer");
+        }
+        if (failure == null) {
+            failures.catalogReached();
+            return;
+        }
+        var owner = JavaRuntimeService.running(env).owner;
+        var reason = sentence(brief(failure));
+        failures.failed("Couldn't check " + owner + "'s catalog for a newer Java: " + reason);
+        failures.catalogRuns++;
+        if (failures.catalogRuns < CATALOG_RUNS || failures.catalogTold) return;
+        if (notify(recipient, "JClaw couldn't check " + owner + "'s catalog for a newer Java on three daily checks "
+                + "in a row, so it cannot tell whether Java " + env.javaVersion() + " has a newer patch. The last "
+                + "check failed with: " + reason + " JClaw keeps checking once a day.", null, null)) {
+            failures.catalogTold = true;
+            EventLogger.info(CATEGORY, "Told the operator that " + owner + "'s catalog could not be checked on "
+                    + CATALOG_RUNS + " runs in a row");
+        }
     }
 
-    private static boolean notify(String recipient, String message, Release release) {
+    private static void downloadFailed(Environment env, Release release, Exception e, Failures failures,
+                                       String recipient) {
+        var reason = sentence(brief(e instanceof JavaRuntimeService.RefusedException refused ? refused.inWords()
+                : Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName())));
+        failures.failed(name(env, release) + " could not be downloaded: " + reason);
+        if (failures.downloadFailed(release.archive()) < DOWNLOAD_RUNS || failures.buildTold) return;
+        if (notify(recipient, named(env, release) + " could not be downloaded on two daily checks in a row: " + reason
+                + " JClaw tries again at each daily check, or try it now from Settings > Maintenance > Java runtime.",
+                release.notesUrl(), release.notesLabel())) {
+            failures.buildTold = true;
+            EventLogger.info(CATEGORY, "Told the operator that Java " + release.version() + " could not be "
+                    + "downloaded on " + DOWNLOAD_RUNS + " runs in a row");
+        }
+    }
+
+    // A respin of the running Java version differs only in its Zulu build, so it is named by that, as the panel does.
+    private static String name(Environment env, Release release) {
+        var build = release.build();
+        return build != null && env.build() != null
+                && JavaRuntimeService.compareVersions(release.version(), env.javaVersion()) == 0
+                ? "Zulu " + build : "Java " + release.version();
+    }
+
+    // "Java 25.0.5.1, a security and bug-fix release," reads as one phrase; with no type it is the name alone.
+    private static String named(Environment env, Release release) {
+        var words = JavaRuntimeService.releaseTypeInWords(release.releaseType());
+        return words == null ? name(env, release) : name(env, release) + ", " + words + ",";
+    }
+
+    // One line, so the record keeps one failure a line and a notice never carries a whole catalog payload.
+    private static String brief(String why) {
+        var line = WHITESPACE.matcher(why).replaceAll(" ").strip();
+        return line.length() <= REASON_MAX_CHARS ? line : line.substring(0, REASON_MAX_CHARS) + "…";
+    }
+
+    private static String sentence(String text) {
+        return text.endsWith(".") ? text : text + ".";
+    }
+
+    private static boolean notify(String recipient, String message, @Nullable String linkUrl,
+                                  @Nullable String linkLabel) {
         return Tx.run(() -> {
             var agent = Agent.findByName(recipient);
             if (agent == null) return false;
@@ -165,8 +274,8 @@ public final class JavaRuntimePatchCheck {
             n.agent = agent;
             n.title = TITLE;
             n.content = message;
-            n.linkUrl = release.notesUrl();
-            n.linkLabel = release.notesLabel();
+            n.linkUrl = linkUrl;
+            n.linkLabel = linkLabel;
             n.save();
             return true;
         });
@@ -178,16 +287,114 @@ public final class JavaRuntimePatchCheck {
         if (builds.contains(build)) return;
         builds.add(build);
         var kept = builds.subList(Math.max(0, builds.size() - HANDLED_KEPT), builds.size());
-        var dir = app.resolve("data");
         try {
-            Files.createDirectories(dir);
-            var part = dir.resolve(HANDLED_FILE + ".part");
-            Files.writeString(part, String.join("\n", kept) + "\n", StandardCharsets.UTF_8);
-            Files.move(part, dir.resolve(HANDLED_FILE), StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
+            write(app, HANDLED_FILE, String.join("\n", kept) + "\n");
         } catch (IOException e) {
             EventLogger.warn(CATEGORY, "Could not record Java build " + build + " as handled, so it may be "
                     + "downloaded or announced again: " + e.getMessage());
+        }
+    }
+
+    private static void write(Path app, String file, String content) throws IOException {
+        var dir = app.resolve("data");
+        Files.createDirectories(dir);
+        var part = dir.resolve(file + ".part");
+        Files.writeString(part, content, StandardCharsets.UTF_8);
+        Files.move(part, dir.resolve(file), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    /** {@link #FAILURES_FILE}, read as a run starts and saved as it ends. */
+    private static final class Failures {
+        int catalogRuns;
+        boolean catalogTold;
+        @Nullable String build;
+        int buildRuns;
+        boolean buildTold;
+        @Nullable String line;
+        @Nullable Instant at;
+
+        void catalogReached() {
+            catalogRuns = 0;
+            catalogTold = false;
+        }
+
+        /** @return the runs in a row that have now failed to download {@code archive} */
+        int downloadFailed(String archive) {
+            if (!archive.equals(build)) {
+                build = archive;
+                buildRuns = 0;
+                buildTold = false;
+            }
+            buildRuns++;
+            return buildRuns;
+        }
+
+        /** A run that downloaded the newest build, found it handled, or found nothing newer. */
+        void settled() {
+            build = null;
+            buildRuns = 0;
+            buildTold = false;
+        }
+
+        void failed(String why) {
+            line = why;
+            at = AppClock.now();
+        }
+
+        static Failures read(Path app) {
+            var f = new Failures();
+            var fields = new HashMap<String, String>();
+            try {
+                for (var l : Files.readAllLines(app.resolve("data").resolve(FAILURES_FILE), StandardCharsets.UTF_8)) {
+                    int eq = l.indexOf('=');
+                    if (eq > 0) fields.putIfAbsent(l.substring(0, eq), l.substring(eq + 1));
+                }
+            } catch (IOException _) {
+                return f;
+            }
+            f.catalogRuns = count(fields.get("catalog"));
+            f.catalogTold = "true".equals(fields.get("catalogTold"));
+            f.build = fields.get("build");
+            f.buildRuns = f.build == null ? 0 : count(fields.get("buildRuns"));
+            f.buildTold = "true".equals(fields.get("buildTold"));
+            f.line = fields.get("failure");
+            try {
+                var at = fields.get("failureAt");
+                f.at = at == null ? null : Instant.parse(at);
+            } catch (DateTimeParseException _) {
+                f.at = null;
+            }
+            return f;
+        }
+
+        void save(Path app) {
+            boolean clear = catalogRuns == 0 && buildRuns == 0;
+            try {
+                if (clear) {
+                    Files.deleteIfExists(app.resolve("data").resolve(FAILURES_FILE));
+                    return;
+                }
+                var out = new StringBuilder("catalog=" + catalogRuns + "\ncatalogTold=" + catalogTold + "\n");
+                if (build != null) {
+                    out.append("build=").append(build).append("\nbuildRuns=").append(buildRuns).append("\nbuildTold=")
+                            .append(buildTold).append('\n');
+                }
+                if (line != null && at != null) {
+                    out.append("failure=").append(line).append("\nfailureAt=").append(at).append('\n');
+                }
+                write(app, FAILURES_FILE, out.toString());
+            } catch (IOException e) {
+                EventLogger.warn(CATEGORY, "Could not record the Java patch check's failures, so a notice about "
+                        + "them may come late or twice: " + e.getMessage());
+            }
+        }
+
+        private static int count(@Nullable String value) {
+            try {
+                return value == null ? 0 : Math.max(0, Integer.parseInt(value.strip()));
+            } catch (NumberFormatException _) {
+                return 0;
+            }
         }
     }
 }

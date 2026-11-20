@@ -38,6 +38,8 @@ interface JavaRuntimePreflight {
   downloadError: string | null
   lastStart: string | null
   lastStartAt: string | null
+  checkFailure: string | null
+  checkFailureAt: string | null
   rebuildsStartupCache: boolean
   switches: JavaRuntimeSwitch[]
 }
@@ -285,6 +287,11 @@ const lastStartAt = computed(() => {
   return at ? new Date(at).toLocaleString() : null
 })
 
+const checkFailureAt = computed(() => {
+  const at = runtime.value?.checkFailureAt
+  return at ? new Date(at).toLocaleString() : null
+})
+
 const busy = computed(() => restarting.value || cancelling.value)
 
 const errorLine = computed(() =>
@@ -355,6 +362,15 @@ const errorLine = computed(() =>
           >
             Last start: {{ runtime.lastStart }}<template v-if="lastStartAt">
               ({{ lastStartAt }})
+            </template>
+          </div>
+          <div
+            v-if="runtime?.checkFailure"
+            class="text-xs text-fg-muted mt-0.5"
+            data-testid="java-runtime-daily-check"
+          >
+            Last daily check: {{ runtime.checkFailure }}<template v-if="checkFailureAt">
+              ({{ checkFailureAt }})
             </template>
           </div>
         </div>

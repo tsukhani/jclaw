@@ -19,6 +19,7 @@ import services.JavaRuntimeService;
 import services.RestartService;
 import services.Tx;
 import services.UpgradeService;
+import utils.AppClock;
 import utils.RestartNarrator;
 
 import java.io.IOException;
@@ -26,7 +27,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -559,6 +562,38 @@ class ApiSystemControllerTest extends FunctionalTest {
     }
 
     @Test
+    void theDailyChecksLastFailureIsShownUntilACheckSucceeds() throws Exception {
+        login();
+        var env = builtIn("25.0.4", false);
+        JavaRuntimeService.setEnvironmentForTest(env);
+        Tx.run(() -> AgentService.create("jf542-operator", "openrouter", "gpt-4.1"));
+        var url = "https://cdn.azul.com/zulu/bin/zulu-jre25.0.5.tar.gz";
+        JavaRuntimeService.Stager down = (r, home, p) -> {
+            throw new IOException("HTTP 503 fetching " + url);
+        };
+
+        var before = json(GET("/api/system/java-runtime"));
+        assertTrue(before.get("checkFailure").isJsonNull());
+        assertTrue(before.get("checkFailureAt").isJsonNull());
+
+        AppClock.runWith(Clock.fixed(Instant.parse("2026-11-20T09:00:00Z"), ZoneOffset.UTC),
+                () -> JavaRuntimePatchCheck.run(env, () -> checked(release("25.0.5")), new JavaRuntimeService.Download(),
+                        down, "jf542-operator"));
+
+        var failed = json(GET("/api/system/java-runtime"));
+        assertEquals("Java 25.0.5 could not be downloaded: HTTP 503 fetching " + url + ".",
+                failed.get("checkFailure").getAsString());
+        assertEquals("2026-11-20T09:00:00Z", failed.get("checkFailureAt").getAsString());
+
+        JavaRuntimePatchCheck.run(env, () -> checked(release("25.0.4")), new JavaRuntimeService.Download(), down,
+                "jf542-operator");
+
+        var settled = json(GET("/api/system/java-runtime"));
+        assertTrue(settled.get("checkFailure").isJsonNull());
+        assertTrue(settled.get("checkFailureAt").isJsonNull());
+    }
+
+    @Test
     void theNewestPatchIsDescribedInPlainWordsWithItsReleaseNotes() throws Exception {
         login();
         JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", false));
@@ -925,6 +960,10 @@ class ApiSystemControllerTest extends FunctionalTest {
     private static JavaRuntimeService.Release release(String version) {
         return new JavaRuntimeService.Release(version, "https://cdn.azul.com/zulu/bin/zulu-jre" + version + ".tar.gz",
                 "c3".repeat(32), "zulu-jre" + version + ".tar.gz");
+    }
+
+    private static JavaRuntimeService.Checked checked(JavaRuntimeService.Release release) {
+        return new JavaRuntimeService.Checked(new JavaRuntimeService.Answer(release, null), null);
     }
 
     private static JavaRuntimeService.Release temurin(String version) {
