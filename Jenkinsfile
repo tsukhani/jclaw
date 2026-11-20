@@ -660,12 +660,18 @@ pipeline {
                     echo "The candidate image boots and reports $APP_VERSION: $image"
                 '''
                 // Each release's Java, read off its build log. The arm64 half runs under the QEMU the build set up.
+                // Each platform runs by its own manifest's digest: the image's index digest names both, and once pulled
+                // for one platform it cannot be pulled for the other ("cannot overwrite digest", v1.0.26-rc.3).
                 sh '''
                     image=$(cat dist/CANDIDATE_IMAGE)
+                    index=$(docker buildx imagetools inspect --raw "$image")
+                    pick='[.manifests[] | select(.platform.os == $os and .platform.architecture == $arch) | .digest] | if length == 1 then .[0] else empty end'
                     for platform in linux/amd64 linux/arm64; do
-                        docker pull -q --platform "$platform" "$image" > /dev/null
+                        digest=$(printf '%s' "$index" | jq -r --arg os "${platform%/*}" --arg arch "${platform#*/}" "$pick")
+                        [ -n "$digest" ] || { echo "The candidate image has no single $platform manifest: $image"; exit 1; }
+                        docker pull -q --platform "$platform" "${image%@*}@$digest" > /dev/null
                         echo "Java in the candidate image, $platform:"
-                        docker run --rm --platform "$platform" --entrypoint sh "$image" -c 'exec "$JAVA_HOME/bin/java" -version' 2>&1
+                        docker run --rm --platform "$platform" --entrypoint sh "${image%@*}@$digest" -c 'exec "$JAVA_HOME/bin/java" -version' 2>&1
                     done
                 '''
                 archiveArtifacts artifacts: 'dist/CANDIDATE_IMAGE', fingerprint: true

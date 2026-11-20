@@ -44,10 +44,28 @@ class ReleaseImageRebuildConformanceTest extends UnitTest {
         assertTrue(loop.find(), "the Candidate Image stage no longer prints the image's java -version per platform");
         assertEquals(List.of("linux/amd64", "linux/arm64"), List.of(loop.group(1).trim().split("\\s+")));
         var after = body.substring(loop.end());
-        assertTrue(after.substring(0, after.indexOf("done")).contains("\"$image\" -c 'exec \"$JAVA_HOME/bin/java\" -version'"),
-                () -> "the platform loop no longer runs java -version in the candidate image: " + after);
+        assertTrue(after.substring(0, after.indexOf("done")).contains(
+                        "\"${image%@*}@$digest\" -c 'exec \"$JAVA_HOME/bin/java\" -version'"),
+                () -> "the platform loop no longer runs java -version in each platform's own image: " + after);
         assertEquals(buildPlatforms(buildOptions(body)), List.of(loop.group(1).trim().split("\\s+")),
                 "the stage must print the Java of every platform it builds, and only those");
+    }
+
+    @Test
+    void eachPlatformsJavaIsReadFromItsOwnManifestNeverFromTheImagesIndexDigest() throws IOException {
+        var body = stage("Candidate Image");
+        var loop = PLATFORM_LOOP.matcher(body);
+        assertTrue(loop.find(), "the Candidate Image stage no longer prints the image's java -version per platform");
+        assertTrue(body.substring(0, loop.start()).contains("index=$(docker buildx imagetools inspect --raw \"$image\")"),
+                () -> "the platform loop must pick each platform's digest from the image's index: " + body);
+        var inLoop = body.substring(loop.end(), body.indexOf("done", loop.end()));
+        assertFalse(inLoop.contains("\"$image\""),
+                () -> "the platform loop pulls or runs the index digest itself, which Docker stores for one platform "
+                        + "only, so the second platform fails with 'cannot overwrite digest': " + inLoop);
+        assertTrue(inLoop.contains("docker pull -q --platform \"$platform\" \"${image%@*}@$digest\""),
+                () -> "the platform loop no longer pulls each platform by its own digest: " + inLoop);
+        assertTrue(inLoop.contains("[ -n \"$digest\" ] || {"),
+                () -> "the platform loop must stop when the index lists no single manifest for a platform: " + inLoop);
     }
 
     private static String read(String file) throws IOException {
