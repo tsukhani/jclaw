@@ -56,7 +56,7 @@ class JavaRuntimeScriptTest extends UnitTest {
 
         var out = run(home, Map.of(), "use_bundled_jre; apply_staged_jre; echo \"JAVA_HOME=$JAVA_HOME\"; echo \"JAVA=$(command -v java)\"");
 
-        assertTrue(out.contains("==> Installing the Java runtime downloaded in Settings...\n"
+        assertTrue(out.contains("==> Installing the downloaded Java runtime...\n"
                 + "    Java runtime: upgraded 25.0.4 → 25.0.5\n"), out);
         assertEquals("upgraded 25.0.4 → 25.0.5", status(home));
         // pwd, as jclaw.sh resolves it: logical, so a symlinked temp directory keeps its name.
@@ -106,7 +106,7 @@ class JavaRuntimeScriptTest extends UnitTest {
 
         var out = run(home, Map.of(), "apply_staged_jre; echo \"JAVA=$(command -v java)\"");
 
-        assertEquals("==> Installing the Java runtime downloaded in Settings...\n"
+        assertEquals("==> Installing the downloaded Java runtime...\n"
                 + "    Java runtime: switched Zulu 25.0.5.1 → Temurin 25.0.5.1\n"
                 + "JAVA=" + home.resolve("jre/" + TEMURIN_TOP + HOME_IN_ARCHIVE + "/bin/java") + "\n", out);
         assertEquals("switched Zulu 25.0.5.1 → Temurin 25.0.5.1", status(home));
@@ -116,7 +116,7 @@ class JavaRuntimeScriptTest extends UnitTest {
         var backTop = "zulu25.38.203-ca-jre25.0.5.1-macosx_aarch64";
         stage(home, backTop + ".tar.gz", "25.0.5.1", "25.38.203", "Zulu",
                 tarGz(runtime(backTop, "25.0.5.1", "Zulu25.38+203-CA", true)));
-        assertEquals("==> Installing the Java runtime downloaded in Settings...\n"
+        assertEquals("==> Installing the downloaded Java runtime...\n"
                 + "    Java runtime: switched Temurin 25.0.5.1 → Zulu 25.0.5.1\n", run(home, Map.of(), "apply_staged_jre"));
         assertEquals(List.of(backTop), listing(home.resolve("jre")));
         assertEquals(List.of(TEMURIN_TOP), listing(home.resolve("jre.previous")));
@@ -124,7 +124,7 @@ class JavaRuntimeScriptTest extends UnitTest {
         // A patch from the vendor it runs reads as an upgrade, as before.
         var nextTop = "zulu25.40.1-ca-jre25.0.6-macosx_aarch64";
         stage(home, nextTop + ".tar.gz", "25.0.6", "25.40.1", "Zulu", tarGz(runtime(nextTop, "25.0.6", "Zulu25.40+1-CA", true)));
-        assertEquals("==> Installing the Java runtime downloaded in Settings...\n"
+        assertEquals("==> Installing the downloaded Java runtime...\n"
                 + "    Java runtime: upgraded 25.0.5.1 → 25.0.6\n", run(home, Map.of(), "apply_staged_jre"));
         assertEquals("upgraded 25.0.5.1 → 25.0.6", status(home));
         assertEquals(List.of(nextTop), listing(home.resolve("jre")));
@@ -167,7 +167,7 @@ class JavaRuntimeScriptTest extends UnitTest {
 
         var out = run(home, Map.of("JAVA_HOME", host.toString()), "apply_staged_jre");
 
-        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: switched from the "
+        assertEquals("==> Installing the downloaded Java runtime...\n    Java runtime: switched from the "
                 + "host's Java 25.0.3 to Temurin 25.0.5 at " + home + "/jre\n", out);
         assertEquals(List.of(TEMURIN_TOP), listing(home.resolve("jre")));
         assertFalse(Files.exists(home.resolve("jre.previous")));
@@ -356,7 +356,7 @@ class JavaRuntimeScriptTest extends UnitTest {
 
         var line = "switched from the host's Java 27.0.1 to Java 25.0.5 at " + home + "/jre";
         var newHome = home.resolve("jre/" + NEW_TOP + HOME_IN_ARCHIVE);
-        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: " + line + "\n"
+        assertEquals("==> Installing the downloaded Java runtime...\n    Java runtime: " + line + "\n"
                 + "JAVA_HOME=" + newHome + "\nJAVA=" + newHome + "/bin/java\n", out);
         assertEquals(line, status(home));
         assertEquals(List.of(NEW_TOP), listing(home.resolve("jre")));
@@ -374,7 +374,7 @@ class JavaRuntimeScriptTest extends UnitTest {
         var out = run(home, Map.of("JAVA_HOME", "", "PATH", host.resolve("bin") + File.pathSeparator + System.getenv("PATH")),
                 "apply_staged_jre");
 
-        assertEquals("==> Installing the Java runtime downloaded in Settings...\n"
+        assertEquals("==> Installing the downloaded Java runtime...\n"
                 + "    Java runtime: switched from the host's Java 25.0.3 to Java 25.0.5 at " + home + "/jre\n", out);
         assertEquals(List.of(NEW_TOP), listing(home.resolve("jre")));
     }
@@ -417,7 +417,7 @@ class JavaRuntimeScriptTest extends UnitTest {
                 "apply_staged_jre; echo \"JAVA_HOME=$JAVA_HOME\"");
 
         var line = "kept the host's Java 25.0.3: could not move Java 25.0.5 into " + home + "/jre";
-        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: " + line + "\n"
+        assertEquals("==> Installing the downloaded Java runtime...\n    Java runtime: " + line + "\n"
                 + "JAVA_HOME=" + host + "\n", out);
         assertEquals(line, status(home));
         assertFalse(Files.exists(home.resolve("jre")));
@@ -434,7 +434,7 @@ class JavaRuntimeScriptTest extends UnitTest {
         var out = run(home, Map.of("JAVA_HOME", host.toString()), "apply_staged_jre");
 
         var line = "kept the host's Java 25.0.3: " + home + "/jre holds no Java; move it away to install Java 25.0.5";
-        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: " + line + "\n", out);
+        assertEquals("==> Installing the downloaded Java runtime...\n    Java runtime: " + line + "\n", out);
         assertEquals(line, status(home));
         assertEquals(List.of("notes"), listing(home.resolve("jre")));
         assertFalse(Files.exists(home.resolve("jre.staged")));
@@ -474,7 +474,7 @@ class JavaRuntimeScriptTest extends UnitTest {
 
     private void assertHostKept(Path home, Path host, String line) throws Exception {
         var out = run(home, Map.of("JAVA_HOME", host.toString()), "apply_staged_jre; echo \"JAVA_HOME=$JAVA_HOME\"");
-        assertEquals("==> Installing the Java runtime downloaded in Settings...\n    Java runtime: " + line + "\n"
+        assertEquals("==> Installing the downloaded Java runtime...\n    Java runtime: " + line + "\n"
                 + "JAVA_HOME=" + host + "\n", out);
         assertEquals(line, status(home));
         assertFalse(Files.exists(home.resolve("jre")));

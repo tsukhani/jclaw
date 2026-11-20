@@ -539,12 +539,14 @@ public final class JavaRuntimeService {
     }
 
     /**
-     * True when switching to {@code managed} would take a host Java back to an older patch of its own major, which
-     * {@link #stageable} refuses and the panel therefore never offers. A host Java of another major gives way to
-     * the one JClaw is tested on.
+     * True when switching to {@code managed} would take a host Java back to an older patch of its own major, by
+     * {@link #compareBuilds}, which {@link #stageable} refuses and the panel therefore never offers. A host Java of
+     * another major gives way to the one JClaw is tested on.
      */
     public static boolean undoesFixes(Environment env, Release managed) {
-        return major(managed.version()) == major(env.javaVersion()) && isNewer(env.javaVersion(), managed.version());
+        return major(managed.version()) == major(env.javaVersion())
+                && compareBuilds(env.distribution(), env.javaVersion(), env.build(),
+                        managed.vendor(), managed.version(), managed.build()) > 0;
     }
 
     /**
@@ -984,8 +986,12 @@ public final class JavaRuntimeService {
                     + running.label + " " + env.javaVersion() + " JClaw runs on, so switching to it would undo fixes.");
         }
         if (kind == Kind.EXTERNAL && undoesFixes(env, latest)) {
-            throw new IllegalStateException(latest.vendor().label + " " + latest.version() + " is older than the Java "
-                    + env.javaVersion() + " JClaw runs on, so switching to it would undo fixes.");
+            // At one Java version only the builds differ, so the versions alone would name one number twice.
+            throw new IllegalStateException(compareVersions(latest.version(), env.javaVersion()) == 0
+                    ? latest.vendor().label + " " + latest.build() + " is older than the " + running.label + " "
+                            + env.build() + " JClaw runs on, so switching to it would undo fixes."
+                    : latest.vendor().label + " " + latest.version() + " is older than the Java "
+                            + env.javaVersion() + " JClaw runs on, so switching to it would undo fixes.");
         }
         if (!Files.isWritable(env.home())) {
             throw new IllegalStateException(env.home() + " is not writable, so a new Java cannot be staged beside "

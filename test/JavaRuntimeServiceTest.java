@@ -523,6 +523,24 @@ class JavaRuntimeServiceTest extends UnitTest {
     }
 
     @Test
+    void aSwitchToAnOlderZuluBuildOfTheHostsJavaVersionUndoesFixesAndIsRefusedByBuild() throws IOException {
+        var app = install();
+        var host = env(app, Files.createDirectories(tmp.resolve("system")), "25.0.5", "Zulu25.38+107-CA");
+        var older = release("25.0.5", "25.38.105");
+        var temurin = new Release("25.0.5", "https://github.com/adoptium/temurin25-binaries/releases/download/jre.tar.gz",
+                hash("C3"), "jre.tar.gz", null, null, Vendor.TEMURIN, null);
+
+        assertTrue(JavaRuntimeService.undoesFixes(host, older));
+        assertFalse(JavaRuntimeService.undoesFixes(host, release("25.0.5", "25.38.107")));
+        assertFalse(JavaRuntimeService.undoesFixes(host, release("25.0.5", "25.38.108")));
+        assertFalse(JavaRuntimeService.undoesFixes(host, release("25.0.5.1", "25.38.201")));
+        assertFalse(JavaRuntimeService.undoesFixes(host, temurin));
+        assertRefused("Zulu 25.38.105 is older than the Zulu 25.38.107 JClaw runs on, so switching to it would undo fixes.",
+                host, older, null, false);
+        assertEquals(temurin, JavaRuntimeService.stageable(host, temurin, null, false));
+    }
+
+    @Test
     void theSwitchInstallsTheManagedMajorFromTheVendorAskedForWhateverMajorTheHostRuns() throws IOException {
         var asked = new ArrayList<String>();
         var name = "zulu25.38.107-ca-jre25.0.5-linux_x64.tar.gz";

@@ -52,7 +52,7 @@ const { mutate, error: mutationError } = useApiMutation()
 const { failure: restartFailure, busy: restarting, statusLine: restartLine, steps: restartSteps, restart } = useRestartAndReconnect()
 
 // useLazyFetch, not useFetch: a top-level `await` here suspends the whole
-// settings panel behind a request that may be waiting on Azul.
+// settings panel behind a request that may be waiting on a vendor's catalog.
 const { data: runtime, refresh } = useLazyFetch<JavaRuntimePreflight>(ENDPOINT)
 
 const cacheNote = computed(() => runtime.value?.rebuildsStartupCache
@@ -127,7 +127,7 @@ onBeforeUnmount(() => {
   stopPolling()
 })
 
-// refresh() would read the server's hour-long catalog cache; refresh=true asks Azul again.
+// refresh() would read the server's hour-long catalog cache; refresh=true asks the vendor's catalog again.
 async function checkAgain() {
   checking.value = true
   failure.value = null

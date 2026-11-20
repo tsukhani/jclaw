@@ -18,7 +18,7 @@ public class JavaRuntimePatchJob extends PeriodicJob {
 
     @Override
     public void doJob() {
-        // The suite runs from a checkout, and a test's environment seam must never reach Azul from here.
+        // The suite runs from a checkout, and a test's environment seam must never reach a vendor's catalog from here.
         if (Play.runningInTestMode()) return;
         JavaRuntimePatchCheck.run(JavaRuntimeService.environment(), () -> JavaRuntimeService.latest(true),
                 JavaRuntimeService.CURRENT, JavaRuntimeService::download, Agent.MAIN_AGENT_NAME);

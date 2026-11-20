@@ -3557,7 +3557,7 @@ apply_staged_jre() {
         rm -f "$SCRIPT_DIR/data/java-runtime.status" || true
         return 0
     fi
-    echo "==> Installing the Java runtime downloaded in Settings..."
+    echo "==> Installing the downloaded Java runtime..."
     version=$(sed -n 's/^version=//p' "$home/jre.staged/manifest" | head -1)
     [[ "$version" =~ $version_re ]] || version=""
     restart_phase java "Installing Java${version:+ $version}" "installing Java failed"
