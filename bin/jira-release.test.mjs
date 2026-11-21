@@ -15,7 +15,7 @@ import { jiraFrom, ticketKeys } from "./jira-release.mjs";
 const SCRIPT = join(resolve(dirname(fileURLToPath(import.meta.url))), "jira-release.mjs");
 const TOKEN = "stand-in-token-123";
 const USAGE = "give tickets <from> <to>, record <vX.Y.Z> <YYYY-MM-DD> <description> [<key>…], done <vX.Y.Z> <key>…, "
-  + "close <key> <reason>, or audit [<from>]\n";
+  + "close <key> <reason>, drop <key> <reason>, or audit [<from>]\n";
 
 test("the keys are the JF tickets the subjects name, each once, in number order", () => {
   deepStrictEqual(ticketKeys([
@@ -178,7 +178,8 @@ test("a malformed argument or a config without the server answers 2 without aski
       ["done", "v1.0.21", "JCLAW-12"], ["record", "1.0.21", "2026-11-17", "d"],
       ["record", "v1.0.21", "17-11-2026", "d"], ["record", "v1.0.21", "2026-11-17", " "], ["record", "v1.0.21", "2026-11-17"],
       [...RECORD, "jf-1"], ["tickets", "v1.0.20"], ["undo", "JF-1"], ["close"], ["close", "JF-1"], ["close", "JF-1", " "],
-      ["close", "JCLAW-12", "a duplicate"], ["close", "JF-1", "a", "duplicate"], ["audit", "v1.0.20", "HEAD"]]) {
+      ["close", "JCLAW-12", "a duplicate"], ["close", "JF-1", "a", "duplicate"], ["drop"], ["drop", "JF-1"],
+      ["drop", "JF-1", " "], ["drop", "JCLAW-12", "a duplicate"], ["drop", "JF-1", "a", "duplicate"], ["audit", "v1.0.20", "HEAD"]]) {
       deepStrictEqual(await cli(args, config), { code: 2, stdout: "", stderr: USAGE }, args.join(" "));
     }
     strictEqual(seen.length, 0);
@@ -225,7 +226,7 @@ test("tickets lists the keys in the subjects of the range's commits, and a range
   });
 });
 
-test("close refuses with exit 1, asking Jira nothing, when a commit on a branch or a remote-tracking branch names it", async () => {
+test("close and drop refuse with exit 1, asking Jira nothing, when a commit on a branch or a remote-tracking branch names it", async () => {
   await withJira(() => [200, {}], async ({ config, seen }) => {
     await inRepo(async ({ repo, git, commit, refTo }) => {
       commit("feat: a story (JF-389)");
@@ -234,10 +235,13 @@ test("close refuses with exit 1, asking Jira nothing, when a commit on a branch 
       commit("fix: on a branch (JF-410)");
       git("checkout", "-q", "-");
       refTo("refs/remotes/origin/feature", "chore: from origin (JF-420)");
-      for (const [key, subject] of [["JF-389", "fix: its follow-up (JF-389)"], ["JF-410", "fix: on a branch (JF-410)"],
-        ["JF-420", "chore: from origin (JF-420)"]]) {
-        deepStrictEqual(await cli(["close", key, "Folded into JF-1."], config, repo), { code: 1, stderr: "",
-          stdout: `${key}: not closed, since "${subject}" names it: /deploy moves it to Done when a release ships it.\n` }, key);
+      for (const [command, verb] of [["close", "closed"], ["drop", "dropped"]]) {
+        for (const [key, subject] of [["JF-389", "fix: its follow-up (JF-389)"], ["JF-410", "fix: on a branch (JF-410)"],
+          ["JF-420", "chore: from origin (JF-420)"]]) {
+          deepStrictEqual(await cli([command, key, "Folded into JF-1."], config, repo), { code: 1, stderr: "",
+            stdout: `${key}: not ${verb}, since "${subject}" names it: /deploy moves it to Done when a release ships it.\n` },
+            `${command} ${key}`);
+        }
       }
       strictEqual(seen.length, 0);
     });
@@ -265,6 +269,8 @@ test("close posts the reason and then moves a ticket no branch names to Done, an
           body: { body: "Closed without a release, since no commit names JF-431: Folded into JF-410." } },
         { method: "POST", url: "/rest/api/2/issue/JF-431/transitions", auth: `Bearer ${TOKEN}`, body: { transition: { id: "31" } } },
       ]);
+      // A spike's points are delivered work, so close leaves its sprint, points and Fix Version alone.
+      strictEqual(seen.some((s) => s.method === "PUT" || s.url.startsWith("/rest/agile/")), false);
       seen.length = 0;
       deepStrictEqual(await cli(["close", "JF-432", "A duplicate of JF-410."], config, repo),
         { code: 0, stderr: "", stdout: "JF-432: left as Done.\n" });
@@ -315,6 +321,150 @@ const auditJira = (fields, pages) => (method, url) => {
   const key = url.match(/JF-\d+/)[0];
   return fields[key] ? [200, { fields: fields[key] }] : [404, { errorMessages: ["Issue Does Not Exist"] }];
 };
+
+const DROP_READ = "?fields=status,issuetype,fixVersions,customfield_10006,sprint";
+const DROPPED = (key, reason) => `Closed without being built, since no commit names ${key}: no code was delivered, and Done `
+  + `closes it out rather than recording a shipped change. ${reason}`;
+// The agile read lists a ticket's sprint only while that sprint is open, and leaves the field out otherwise.
+const ticket = (status, { type = "Story", points = null, versions = [], sprint } = {}) => [200, { fields: {
+  status: { name: status }, issuetype: { name: type }, customfield_10006: points,
+  fixVersions: versions.map((name) => ({ name })), ...(sprint ? { sprint: { id: 117, name: sprint, state: "future" } } : {}) } }];
+
+/** A Jira that answers each drop call as it should, with the tickets given for the agile read and the epic read. */
+const dropJira = (tickets, epics = {}) => (method, url) => {
+  const key = url.match(/JF-\d+/)?.[0];
+  if (method === "GET" && url.endsWith(DROP_READ)) return tickets[key] ?? [404];
+  if (method === "GET" && url.startsWith("/rest/agile/1.0/epic/")) return [200, { done: epics[key] ?? false }];
+  if (method === "GET") return [200, transitions];
+  if (url.endsWith("/comment")) return [201, { id: "1" }];
+  if (url.includes("/estimation")) return [200, { fieldId: "customfield_10006" }];
+  if (url.startsWith("/rest/agile/1.0/epic/")) return [200, { done: true }];
+  return [204];
+};
+
+const calls = (seen) => seen.map(({ method, url, body }) => (body === undefined ? `${method} ${url}` : [`${method} ${url}`, body]));
+
+test("drop posts the reason, takes the ticket out of its sprint, moves it to Done and clears its points and Fix Version",
+  async () => {
+    const jira = dropJira({ "JF-7": ticket("To Do", { points: 13, versions: ["v1.3"], sprint: "v1.3" }) });
+    await withJira(jira, async ({ config, seen }) => {
+      await inRepo(async ({ repo }) => {
+        deepStrictEqual(await cli(["drop", "JF-7", "Superseded by PF-228."], config, repo), { code: 0, stderr: "",
+          stdout: "JF-7: To Do to Done, with the reason posted. Out of sprint v1.3, 13 points cleared, "
+            + "Fix Version v1.3 cleared.\n" });
+        deepStrictEqual(calls(seen), [
+          `GET /rest/agile/1.0/issue/JF-7${DROP_READ}`,
+          ["POST /rest/api/2/issue/JF-7/comment", { body: DROPPED("JF-7", "Superseded by PF-228.") }],
+          ["POST /rest/agile/1.0/backlog/issue", { issues: ["JF-7"] }],
+          "GET /rest/api/2/issue/JF-7/transitions",
+          ["POST /rest/api/2/issue/JF-7/transitions", { transition: { id: "31" } }],
+          ["PUT /rest/agile/1.0/issue/JF-7/estimation?boardId=31", { value: null }],
+          ["PUT /rest/api/2/issue/JF-7", { fields: { fixVersions: [] } }],
+        ]);
+        strictEqual(seen.every((s) => s.auth === `Bearer ${TOKEN}`), true);
+      });
+    });
+  });
+
+test("drop marks an open epic done, and clears only what a ticket holds", async () => {
+  const jira = dropJira({
+    "JF-5": ticket("To Do", { type: "Epic", sprint: "v1.1" }),
+    "JF-14": ticket("In Progress", { points: 1 }),
+    "JF-15": ticket("To Do", { versions: ["v1.2", "v1.3"] }),
+    "JF-16": ticket("To Do"),
+  });
+  await withJira(jira, async ({ config, seen }) => {
+    await inRepo(async ({ repo }) => {
+      deepStrictEqual(await cli(["drop", "JF-5", "Not built."], config, repo), { code: 0, stderr: "",
+        stdout: "JF-5: To Do to Done, with the reason posted. Out of sprint v1.1, epic marked done.\n" });
+      deepStrictEqual(calls(seen), [
+        `GET /rest/agile/1.0/issue/JF-5${DROP_READ}`,
+        "GET /rest/agile/1.0/epic/JF-5",
+        ["POST /rest/api/2/issue/JF-5/comment", { body: DROPPED("JF-5", "Not built.") }],
+        ["POST /rest/agile/1.0/backlog/issue", { issues: ["JF-5"] }],
+        "GET /rest/api/2/issue/JF-5/transitions",
+        ["POST /rest/api/2/issue/JF-5/transitions", { transition: { id: "31" } }],
+        ["POST /rest/agile/1.0/epic/JF-5", { done: true }],
+      ]);
+      for (const [key, stdout, last] of [
+        ["JF-14", "JF-14: In Progress to Done, with the reason posted. 1 point cleared.\n",
+          ["PUT /rest/agile/1.0/issue/JF-14/estimation?boardId=31", { value: null }]],
+        ["JF-15", "JF-15: To Do to Done, with the reason posted. Fix Versions v1.2, v1.3 cleared.\n",
+          ["PUT /rest/api/2/issue/JF-15", { fields: { fixVersions: [] } }]],
+        ["JF-16", "JF-16: To Do to Done, with the reason posted. Nothing to clear.\n",
+          ["POST /rest/api/2/issue/JF-16/transitions", { transition: { id: "31" } }]],
+      ]) {
+        seen.length = 0;
+        deepStrictEqual(await cli(["drop", key, "Not built."], config, repo), { code: 0, stderr: "", stdout }, key);
+        deepStrictEqual(calls(seen).at(-1), last, key);
+        strictEqual(seen.some((s) => s.url.startsWith("/rest/agile/1.0/epic/")), false, key);
+      }
+    });
+  });
+});
+
+test("drop repairs a ticket already Done that still counts as delivered, and leaves one with nothing left alone", async () => {
+  const jira = dropJira({
+    "JF-8": ticket("Done", { points: 8, sprint: "v1.3" }),
+    "JF-9": ticket("Done"),
+    "JF-10": ticket("Done", { type: "Epic" }),
+    "JF-11": ticket("Done", { type: "Epic" }),
+  }, { "JF-10": true, "JF-11": false });
+  await withJira(jira, async ({ config, seen }) => {
+    await inRepo(async ({ repo }) => {
+      deepStrictEqual(await cli(["drop", "JF-8", "Not built."], config, repo), { code: 0, stderr: "",
+        stdout: "JF-8: already Done, with the reason posted. Out of sprint v1.3, 8 points cleared.\n" });
+      deepStrictEqual(calls(seen), [
+        `GET /rest/agile/1.0/issue/JF-8${DROP_READ}`,
+        ["POST /rest/api/2/issue/JF-8/comment", { body: DROPPED("JF-8", "Not built.") }],
+        ["POST /rest/agile/1.0/backlog/issue", { issues: ["JF-8"] }],
+        ["PUT /rest/agile/1.0/issue/JF-8/estimation?boardId=31", { value: null }],
+      ]);
+      seen.length = 0;
+      deepStrictEqual(await cli(["drop", "JF-11", "Not built."], config, repo), { code: 0, stderr: "",
+        stdout: "JF-11: already Done, with the reason posted. Epic marked done.\n" });
+      deepStrictEqual(calls(seen).at(-1), ["POST /rest/agile/1.0/epic/JF-11", { done: true }]);
+      for (const [key, reads] of [["JF-9", [`GET /rest/agile/1.0/issue/JF-9${DROP_READ}`]],
+        ["JF-10", [`GET /rest/agile/1.0/issue/JF-10${DROP_READ}`, "GET /rest/agile/1.0/epic/JF-10"]]]) {
+        seen.length = 0;
+        deepStrictEqual(await cli(["drop", key, "Not built."], config, repo),
+          { code: 0, stderr: "", stdout: `${key}: left as Done, with nothing to clear.\n` }, key);
+        deepStrictEqual(calls(seen), reads, key);
+      }
+    });
+  });
+});
+
+test("drop stops with exit 2 at the first refusal, after the line for what it did", async () => {
+  const full = { "JF-7": ticket("To Do", { points: 13, versions: ["v1.3"], sprint: "v1.3" }),
+    "JF-5": ticket("To Do", { type: "Epic" }) };
+  const refusing = (match, status) => {
+    const base = dropJira(full);
+    return (method, url) => (match(method, url) ? [status] : base(method, url));
+  };
+  for (const [key, match, status, stderr, writes] of [
+    ["JF-404", () => false, 0, "Jira answered 404 for JF-404\n", 0],
+    ["JF-5", (m, u) => m === "GET" && u.startsWith("/rest/agile/1.0/epic/"), 500, "Jira answered 500 for the epic JF-5\n", 0],
+    ["JF-7", (_, u) => u.endsWith("/comment"), 403, "Jira answered 403 to posting the reason on JF-7\n", 1],
+    ["JF-7", (_, u) => u.includes("/backlog/"), 400, "Jira answered 400 to taking JF-7 out of sprint v1.3\n", 2],
+    ["JF-7", (m, u) => m === "POST" && u.endsWith("/transitions"), 400,
+      "JF-7: out of sprint v1.3, with the reason posted.\nJira answered 400 to moving JF-7 to Done\n", 3],
+    ["JF-5", (m, u) => m === "POST" && u.endsWith("/transitions"), 400, "Jira answered 400 to moving JF-5 to Done\n", 2],
+    ["JF-7", (_, u) => u.includes("/estimation"), 400, "JF-7: To Do to Done, with the reason posted. Out of sprint v1.3.\n"
+      + "Jira answered 400 to clearing the points of JF-7\n", 4],
+    ["JF-7", (m, u) => m === "PUT" && u === "/rest/api/2/issue/JF-7", 400, "JF-7: To Do to Done, with the reason posted. "
+      + "Out of sprint v1.3, 13 points cleared.\nJira answered 400 to clearing the Fix Version of JF-7\n", 5],
+    ["JF-5", (m, u) => m === "POST" && u.startsWith("/rest/agile/1.0/epic/"), 400,
+      "JF-5: To Do to Done, with the reason posted.\nJira answered 400 to marking the epic JF-5 done\n", 3],
+  ]) {
+    await withJira(refusing(match, status), async ({ config, seen }) => {
+      await inRepo(async ({ repo }) => {
+        deepStrictEqual(await cli(["drop", key, "Not built."], config, repo), { code: 2, stdout: "", stderr }, stderr);
+        strictEqual(seen.filter((s) => s.method !== "GET").length, writes, stderr);
+      });
+    });
+  }
+});
 
 test("audit lists each ticket named since the last version tag that is not in Review, and each in Review none names", async () => {
   const fields = {

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Records a release in Jira for /deploy: the tickets a range of commits ships, the release as their Fix Version, and
-// Done for those still in Review (JF-462). Closes a ticket no commit names, with its reason, and audits which tickets
-// are out of step with main (JF-504). Contract and exit codes: bin/README.md.
+// Done for those still in Review (JF-462). Closes a ticket no commit names, with its reason, drops one that delivered
+// nothing out of what Jira counts as delivered (JF-555), and audits which tickets are out of step with main (JF-504).
+// Contract and exit codes: bin/README.md.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -10,12 +11,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PROJECT = "JF";
+const BOARD = 31;
+const POINTS = "customfield_10006";
 const TIMEOUT_MS = 30_000;
 const VERSION = /^v\d+\.\d+\.\d+$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const KEY = /^JF-\d+$/;
 const USAGE = "give tickets <from> <to>, record <vX.Y.Z> <YYYY-MM-DD> <description> [<key>…], done <vX.Y.Z> <key>…, "
-  + "close <key> <reason>, or audit [<from>]";
+  + "close <key> <reason>, drop <key> <reason>, or audit [<from>]";
 const PAGE = 100;
 
 /**
@@ -116,8 +119,9 @@ async function moveToDone(call, key) {
 }
 
 /**
- * Closes a ticket no commit names (a spike, a duplicate, a verification task, a won't-do): the reason goes on it as a
- * comment first, since a transition drops the comment it is given, then it moves to Done. The caller has checked git.
+ * Closes a ticket whose work was done with no commit to name it (a spike, a verification task): the reason goes on it
+ * as a comment first, since a transition drops the comment it is given, then it moves to Done. Its sprint, points and
+ * Fix Version stay, since that work was delivered. The caller has checked git.
  */
 async function close(call, [key, reason]) {
   const issue = await call("GET", `/rest/api/2/issue/${key}?fields=status`);
@@ -129,6 +133,69 @@ async function close(call, [key, reason]) {
   if (posted.status !== 201) return { code: 2, lines: [`Jira answered ${posted.status} to posting the reason on ${key}`] };
   const failed = await moveToDone(call, key);
   return failed ? { code: 2, lines: [failed] } : { code: 0, lines: [`${key}: ${status} to Done, with the reason posted.`] };
+}
+
+const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * Closes a ticket that delivered nothing (a won't-do, a duplicate, a superseded story) as close does, and takes away
+ * what would count it as delivered. Jira counts the points of a Done ticket in a sprint as completed when that sprint
+ * closes, and /backlog-grooming sizes later sprints from those counts; a Fix Version says a release shipped it; and an
+ * epic whose Epic Status is not done stays in the backlog's Epics panel. A ticket already Done gets the same clearing,
+ * which repairs one closed before drop existed. The caller has checked git.
+ */
+async function drop(call, [key, reason]) {
+  // The agile read lists the sprint only while it is open: a closed sprint has already counted the ticket.
+  const issue = await call("GET", `/rest/agile/1.0/issue/${key}?fields=status,issuetype,fixVersions,${POINTS},sprint`);
+  if (issue.status !== 200) return { code: 2, lines: [`Jira answered ${issue.status} for ${key}`] };
+  const fields = issue.json().fields ?? {};
+  let openEpic = false;
+  if (fields.issuetype?.name === "Epic") {
+    const epic = await call("GET", `/rest/agile/1.0/epic/${key}`);
+    if (epic.status !== 200) return { code: 2, lines: [`Jira answered ${epic.status} for the epic ${key}`] };
+    openEpic = epic.json().done !== true;
+  }
+  const sprint = fields.sprint?.name;
+  const points = fields[POINTS];
+  const versions = (fields.fixVersions ?? []).map((v) => v.name);
+  const fixVersion = `Fix Version${versions.length > 1 ? "s" : ""}`;
+  const clearings = [
+    typeof points === "number" && { done: `${points} point${points === 1 ? "" : "s"} cleared`, ok: 200,
+      doing: `clearing the points of ${key}`,
+      send: () => call("PUT", `/rest/agile/1.0/issue/${key}/estimation?boardId=${BOARD}`, { value: null }) },
+    versions.length > 0 && { done: `${fixVersion} ${versions.join(", ")} cleared`, ok: 204,
+      doing: `clearing the ${fixVersion} of ${key}`,
+      send: () => call("PUT", `/rest/api/2/issue/${key}`, { fields: { fixVersions: [] } }) },
+    openEpic && { done: "epic marked done", ok: 200, doing: `marking the epic ${key} done`,
+      send: () => call("POST", `/rest/agile/1.0/epic/${key}`, { done: true }) },
+  ].filter(Boolean);
+  const status = fields.status?.name;
+  if (status === "Done" && !sprint && clearings.length === 0) {
+    return { code: 0, lines: [`${key}: left as Done, with nothing to clear.`] };
+  }
+  const posted = await call("POST", `/rest/api/2/issue/${key}/comment`, { body: `Closed without being built, since no `
+    + `commit names ${key}: no code was delivered, and Done closes it out rather than recording a shipped change. ${reason}` });
+  if (posted.status !== 201) return { code: 2, lines: [`Jira answered ${posted.status} to posting the reason on ${key}`] };
+  const cleared = [];
+  // Out of the sprint before Done, as /backlog-grooming has always closed a story, so no sprint report sees the ticket
+  // finished inside the sprint.
+  if (sprint) {
+    const moved = await call("POST", "/rest/agile/1.0/backlog/issue", { issues: [key] });
+    if (moved.status !== 204) return { code: 2, lines: [`Jira answered ${moved.status} to taking ${key} out of sprint ${sprint}`] };
+    cleared.push(`out of sprint ${sprint}`);
+  }
+  if (status !== "Done") {
+    const failed = await moveToDone(call, key);
+    if (failed) return { code: 2, lines: sprint ? [`${key}: out of sprint ${sprint}, with the reason posted.`, failed] : [failed] };
+  }
+  const head = status === "Done" ? `${key}: already Done, with the reason posted.` : `${key}: ${status} to Done, with the reason posted.`;
+  const report = () => (cleared.length > 0 ? `${head} ${sentence(cleared.join(", "))}.` : head);
+  for (const clearing of clearings) {
+    const answered = await clearing.send();
+    if (answered.status !== clearing.ok) return { code: 2, lines: [report(), `Jira answered ${answered.status} to ${clearing.doing}`] };
+    cleared.push(clearing.done);
+  }
+  return { code: 0, lines: [cleared.length > 0 ? report() : `${head} Nothing to clear.`] };
 }
 
 const releasedIn = (fields) => (fields?.fixVersions ?? []).filter((v) => v.released).map((v) => v.name);
@@ -181,16 +248,16 @@ function subjectsOf(cwd, revisions) {
     : { error: `git log ${revisions.join(" ")} failed: ${log.stderr.trim()}` };
 }
 
-// What close and audit read from git before Jira is asked: a refusal or a failure as a result, else what they need.
+// What close, drop and audit read from git before Jira is asked: a refusal or a failure as a result, else what they need.
 function fromGit(command, rest, cwd) {
-  if (command === "close") {
+  if (command === "close" || command === "drop") {
     // Branches and their remote copies, not the stash or other refs: a commit on a branch is work that ships.
     const log = subjectsOf(cwd, ["--branches", "--remotes"]);
     if (log.error) return { result: { code: 2, lines: [log.error] } };
     const naming = log.subjects.find((s) => ticketKeys([s]).includes(rest[0]));
     if (naming === undefined) return {};
-    return { result: { code: 1, lines: [`${rest[0]}: not closed, since "${naming}" names it: `
-      + "/deploy moves it to Done when a release ships it."] } };
+    return { result: { code: 1, lines: [`${rest[0]}: not ${command === "close" ? "closed" : "dropped"}, since "${naming}" `
+      + "names it: /deploy moves it to Done when a release ships it."] } };
   }
   let from = rest[0];
   if (from === undefined) {
@@ -204,8 +271,8 @@ function fromGit(command, rest, cwd) {
 }
 
 /**
- * 0 when everything asked was done or audit found everything in step, 1 when close refused or audit listed a ticket,
- * 2 when an argument was malformed or git or Jira refused or could not be asked.
+ * 0 when everything asked was done or audit found everything in step, 1 when close or drop refused or audit listed a
+ * ticket, 2 when an argument was malformed or git or Jira refused or could not be asked.
  */
 export async function run(args, { configPath, cwd }) {
   const [command, ...rest] = args;
@@ -217,10 +284,12 @@ export async function run(args, { configPath, cwd }) {
   const recordArgs = command === "record" && rest.length >= 3 && VERSION.test(rest[0]) && DATE.test(rest[1])
     && rest[2].trim() !== "" && rest.slice(3).every((k) => KEY.test(k));
   const doneArgs = command === "done" && rest.length >= 2 && VERSION.test(rest[0]) && rest.slice(1).every((k) => KEY.test(k));
-  const closeArgs = command === "close" && rest.length === 2 && KEY.test(rest[0]) && rest[1].trim() !== "";
+  const keyAndReason = rest.length === 2 && KEY.test(rest[0]) && rest[1].trim() !== "";
+  const closeArgs = command === "close" && keyAndReason;
+  const dropArgs = command === "drop" && keyAndReason;
   const auditArgs = command === "audit" && rest.length <= 1;
-  if (!recordArgs && !doneArgs && !closeArgs && !auditArgs) return { code: 2, lines: [USAGE] };
-  const { result, range } = closeArgs || auditArgs ? fromGit(command, rest, cwd) : {};
+  if (!recordArgs && !doneArgs && !closeArgs && !dropArgs && !auditArgs) return { code: 2, lines: [USAGE] };
+  const { result, range } = closeArgs || dropArgs || auditArgs ? fromGit(command, rest, cwd) : {};
   if (result) return result;
   let jira;
   try {
@@ -233,7 +302,8 @@ export async function run(args, { configPath, cwd }) {
   try {
     if (recordArgs) return await record(call, rest);
     if (doneArgs) return await done(call, rest);
-    return await (closeArgs ? close(call, rest) : audit(call, range));
+    if (closeArgs) return await close(call, rest);
+    return await (dropArgs ? drop(call, rest) : audit(call, range));
   } catch (error) {
     return { code: 2, lines: [`Jira could not be asked: ${error.message}`] };
   }

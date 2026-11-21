@@ -312,7 +312,8 @@ Exit 0 printed the number. Exit 2 means a malformed version, a config without th
 node bin/jira-release.mjs tickets v1.0.20 <REL>                    # JF-453 JF-462: the keys the range's subjects name
 node bin/jira-release.mjs record v1.0.21 2026-11-17 "<description>" JF-453 JF-462
 node bin/jira-release.mjs done v1.0.21 JF-453 JF-462               # each in Review with that Fix Version goes to Done
-node bin/jira-release.mjs close JF-411 "Folded into JF-410."        # one no commit names: the reason, then Done
+node bin/jira-release.mjs close JF-411 "Research complete."         # work done with no commit: the reason, then Done
+node bin/jira-release.mjs drop JF-412 "Folded into JF-410."         # nothing delivered: close, then out of every count
 node bin/jira-release.mjs audit                                    # the tickets out of step since the last v* tag
 ```
 
@@ -324,11 +325,18 @@ ticket's Fix Versions, with an add rather than a set, so a ticket keeps the rele
 each ticket in Review that carries the version to Done, by whichever transition Jira offers to Done. It leaves any
 other ticket as it is, a key passed by mistake included.
 
-`close` and `audit` keep Done meaning released (JF-504), since the policy guard refuses a Jira MCP move of a JF ticket
-to Done. `close` is the other way there, for a ticket that ships no code: a spike, a duplicate, a verification task, a
-won't-do. It refuses when a commit subject on a local or remote-tracking branch names the key, since that ticket
-reaches Done at its release; otherwise it posts the reason as a comment, then moves the ticket to Done, and leaves one
-already Done. `audit` changes nothing. From the last `v*` tag before `HEAD`, or the ref given, it lists each key the
+`close`, `drop` and `audit` keep Done meaning released (JF-504), since the policy guard refuses a Jira MCP move of a JF
+ticket to Done. `close` and `drop` are the other ways there, for a ticket that ships no code, and both refuse when a
+commit subject on a local or remote-tracking branch names the key, since that ticket reaches Done at its release.
+`close` is for work done with no commit to name it, such as a spike whose research is finished or a verification
+task: it posts the reason as a comment, then moves the ticket to Done, and leaves one already Done. Its sprint, points
+and Fix Version stay, since that work counts as delivered. `drop` is for a ticket that delivered nothing, such as a
+won't-do, a duplicate or a superseded story (JF-555). It posts the reason after a line saying no code was delivered,
+moves the ticket to Done, and then takes away what would count it as delivered. It takes the ticket out of an open
+sprint, because Jira counts a Done ticket's points as completed when its sprint closes and `/backlog-grooming` sizes
+later sprints from those counts. It clears the Story Points and the Fix Versions, and marks an epic's Epic Status
+done, which takes the epic out of the backlog's Epics panel. On a ticket already Done it clears whatever is left, which
+repairs one closed earlier with `close`, and with nothing left it changes nothing. `audit` changes nothing. From the last `v*` tag before `HEAD`, or the ref given, it lists each key the
 range's subjects name that is not in Review (To Do, In Progress, Done with no released Fix Version, or missing from
 Jira), and each JF ticket in Review the range does not name, whether a release already carries it or not. A Done
 ticket a release carries may be named again by a follow-up commit. `/release-check` runs it and reports what it lists.
@@ -336,7 +344,7 @@ ticket a release carries may be named again by a follow-up commit. `/release-che
 It calls Jira's REST API with the `JIRA_URL` and `JIRA_PERSONAL_TOKEN` of the `jira-confluence` MCP server in
 `~/.claude.json` (`JCLAW_CLAUDE_JSON` names another file), so it holds no secret of its own, and it never prints the
 token. That server's own create-version call fails on this Jira. Exit 0 did everything asked, or found everything in
-step. Exit 1 is `close` refusing, with Jira not asked, or `audit` listing a ticket. Exit 2 means a malformed argument,
+step. Exit 1 is `close` or `drop` refusing, with Jira not asked, or `audit` listing a ticket. Exit 2 means a malformed argument,
 a range or branches git cannot read, no `v*` tag for `audit` to start from, a config without the server, or a refusal
 from Jira, which stops the run after the lines for what it did.
 

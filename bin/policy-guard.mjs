@@ -55,9 +55,10 @@ export const REASONS = {
     + "list them with pgrep -fl and kill those by pid or with a narrower pattern. Only to stop JClaw itself, ask the "
     + `operator in chat, and once they approve, rerun the same command prefixed with ${APPROVAL}=1.`,
   done: "A JF ticket reaches Done only through bin/jira-release.mjs (AGENTS.md Policy): /deploy's done moves each "
-    + "ticket a release ships, and node bin/jira-release.mjs close <key> \"<reason>\" closes one no commit names, such "
-    + "as a spike, a duplicate or a verification task. Through this tool a JF ticket moves only to To Do, In Progress "
-    + "or Review.",
+    + "ticket a release ships. For one no commit names, node bin/jira-release.mjs close <key> \"<reason>\" closes work "
+    + "done without a commit, such as a spike or a verification task, and drop <key> \"<reason>\" closes one that "
+    + "delivered nothing, such as a duplicate or a won't-do, and takes it out of its sprint's count. Through this tool "
+    + "a JF ticket moves only to To Do, In Progress or Review.",
 };
 
 const deny = (rule, reason = REASONS[rule]) => ({ rule, reason });
