@@ -110,7 +110,10 @@ class FirstStartSecretScriptTest extends UnitTest {
         var lines = run.out().lines().toList();
         assertEquals(3, lines.size(), run.out());
         assertEquals("==> First run detected — no certs/.env and no PLAY_SECRET in env.", lines.get(0));
-        assertTrue(lines.get(1).endsWith(": bad interpreter: No such file or directory"), lines.get(1));
+        // bash's own line, worded by its version: 3.2, 5.1 and 5.3 say "bad interpreter", 5.2 "required file not found".
+        assertTrue(Pattern.matches("(jclaw\\.sh|environment)(: line \\d+)?: " + Pattern.quote(tmp.resolve("bin/play").toString())
+                + ": (/nonexistent/bash: bad interpreter: No such file or directory|cannot execute: required file not found)",
+                lines.get(1)), lines.get(1));
         assertEquals("Error: 'play secret' did not write a new PLAY_SECRET to certs/.env.", lines.get(2));
         assertFalse(Files.exists(env), "the half-made certs/.env is removed");
     }
