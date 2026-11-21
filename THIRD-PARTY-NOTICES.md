@@ -20,7 +20,7 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | Apache-2.0 | 189 | 2 | 1 | 1 |
 | MIT | 21 | 44 | 3 | 3 |
 | BSD-2-Clause | 33 | 0 | 0 | 0 |
-| BSD-3-Clause | 15 | 1 | 0 | 0 |
+| BSD-3-Clause | 14 | 1 | 0 | 0 |
 | BSD | 8 | 0 | 0 | 0 |
 | MIT-0 | 1 | 0 | 6 | 0 |
 | LGPL-2.1 | 5 | 0 | 0 | 0 |
@@ -81,7 +81,6 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | com.github.virtuald:curvesapi | 1.08 | BSD | below | https://github.com/virtuald/curvesapi |
 | com.google.code.gson:gson | 2.15.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.google.code.gson/gson |
 | com.google.errorprone:error_prone_annotations | 2.52.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations |
-| com.google.protobuf:protobuf-java | 4.36.2 | BSD-3-Clause | below | https://developers.google.com/protocol-buffers/ |
 | com.google.zxing:core | 3.5.1 | Apache-2.0 | below | https://github.com/zxing/zxing |
 | com.google.zxing:javase | 3.5.1 | Apache-2.0 | below | https://github.com/zxing/zxing |
 | com.googlecode.ez-vcard:ez-vcard | 0.12.1 | BSD-2-Clause | below | http://github.com/mangstadt/ez-vcard |
@@ -148,11 +147,11 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | commons-logging:commons-logging | 1.4.0 | Apache-2.0 | in the jar | https://commons.apache.org/proper/commons-logging/ |
 | Eclipse Mylyn WikiText core, repackaged by Play under jj.play | - | EPL-1.0 | below | https://projects.eclipse.org/projects/mylyn.docs |
 | Eclipse Mylyn WikiText Textile, repackaged by Play under jj.play | - | EPL-1.0 | below | https://projects.eclipse.org/projects/mylyn.docs |
-| io.micrometer:micrometer-commons | 1.17.2 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
-| io.micrometer:micrometer-core | 1.17.2 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
-| io.micrometer:micrometer-observation | 1.17.2 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
-| io.micrometer:micrometer-registry-otlp | 1.17.2 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
-| io.micrometer:micrometer-registry-prometheus | 1.17.2 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
+| io.micrometer:micrometer-commons | 1.18.0 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
+| io.micrometer:micrometer-core | 1.18.0 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
+| io.micrometer:micrometer-observation | 1.18.0 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
+| io.micrometer:micrometer-registry-otlp | 1.18.0 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
+| io.micrometer:micrometer-registry-prometheus | 1.18.0 | Apache-2.0 | in the jar | https://github.com/micrometer-metrics/micrometer |
 | io.netty:netty-buffer | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
 | io.netty:netty-codec-base | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
 | io.netty:netty-codec-classes-quic | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
@@ -173,7 +172,6 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | io.opentelemetry.instrumentation:opentelemetry-jdbc | 2.33.1-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
 | io.opentelemetry.instrumentation:opentelemetry-okhttp-3.0 | 2.33.1-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
 | io.opentelemetry.instrumentation:opentelemetry-runtime-telemetry | 2.33.1-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
-| io.opentelemetry.proto:opentelemetry-proto | 1.10.0-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-proto-java |
 | io.opentelemetry.semconv:opentelemetry-semconv | 1.44.0 | Apache-2.0 | below | https://github.com/open-telemetry/semantic-conventions-java |
 | io.opentelemetry:opentelemetry-api | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
 | io.opentelemetry:opentelemetry-api-incubator | 1.67.0-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
@@ -287,10 +285,11 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.glassfish.jaxb:jaxb-runtime | 4.0.9 | BSD-3-Clause | in the jar | https://eclipse-ee4j.github.io/jaxb-ri/ |
 | org.glassfish.jaxb:txw2 | 4.0.9 | BSD-3-Clause | in the jar | https://eclipse-ee4j.github.io/jaxb-ri/ |
 | org.hdrhistogram:HdrHistogram | 2.2.2 | Public Domain / BSD-2-Clause | in the jar | http://hdrhistogram.github.io/HdrHistogram/ |
+| org.hibernate.accessor:hibernate-accessor | 0.1.0 | Apache-2.0 | in the jar | https://github.com/hibernate/hibernate-accessor |
 | org.hibernate.models:hibernate-models | 1.3.5 | Apache-2.0 | in the jar | https://github.com/hibernate/hibernate-models |
-| org.hibernate.orm:hibernate-core | 7.4.16.Final | Apache-2.0 | in the jar | https://hibernate.org/orm |
-| org.hibernate.orm:hibernate-jcache | 7.4.16.Final | Apache-2.0 | in the jar | https://hibernate.org/orm |
-| org.hibernate.validator:hibernate-validator | 9.1.6.Final | Apache-2.0 | in the jar | https://hibernate.org/validator |
+| org.hibernate.orm:hibernate-core | 7.4.17.Final | Apache-2.0 | in the jar | https://hibernate.org/orm |
+| org.hibernate.orm:hibernate-jcache | 7.4.17.Final | Apache-2.0 | in the jar | https://hibernate.org/orm |
+| org.hibernate.validator:hibernate-validator | 9.2.0.Final | Apache-2.0 | in the jar | https://hibernate.org/validator |
 | org.java-websocket:Java-WebSocket | 1.6.0 | MIT | below | https://github.com/TooTallNate/Java-WebSocket |
 | org.javassist:javassist | 3.33.0-GA | MPL-1.1 / LGPL-2.1 / Apache-2.0 | below | https://www.javassist.org/ |
 | org.jboss.logging:jboss-logging | 3.6.3.Final | Apache-2.0 | below | https://www.jboss.org |
@@ -316,7 +315,7 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.xhtmlrenderer:flying-saucer-core | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-core |
 | org.xhtmlrenderer:flying-saucer-pdf | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-pdf |
 | org.yaml:snakeyaml | 2.7 | Apache-2.0 | below | https://codeberg.org/snakeyaml/snakeyaml |
-| Play Framework 1.x (tsukhani/play1 fork) | 1.13.111 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
+| Play Framework 1.x (tsukhani/play1 fork) | 1.13.112 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
 | tools.jackson.core:jackson-core | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-core |
 | tools.jackson.core:jackson-databind | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
 | tools.jackson.dataformat:jackson-dataformat-cbor | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-dataformats-binary |
@@ -2848,7 +2847,6 @@ are listed above it.
 - io.opentelemetry.instrumentation:opentelemetry-jdbc
 - io.opentelemetry.instrumentation:opentelemetry-okhttp-3.0
 - io.opentelemetry.instrumentation:opentelemetry-runtime-telemetry
-- io.opentelemetry.proto:opentelemetry-proto
 - io.opentelemetry.semconv:opentelemetry-semconv
 - io.opentelemetry:opentelemetry-api
 - io.opentelemetry:opentelemetry-api-incubator
@@ -5809,7 +5807,6 @@ Full text: https://spdx.org/licenses/MIT-0.html
 
 - 3dmol: Copyright (c) 2014, University of Pittsburgh and contributors; (C) Copyright 2011-2012, biochem_fan; Copyright (c) 2010-2012 three.js Authors. All rights reserved.; Copyright (c) 2011 John Resig
 - com.adobe.xmp:xmpcore
-- com.google.protobuf:protobuf-java
 - com.sun.istack:istack-commons-runtime
 - org.antlr:antlr4-runtime
 - org.ow2.asm:asm
