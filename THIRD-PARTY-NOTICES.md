@@ -80,7 +80,7 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | com.github.mangstadt:vinnie | 2.0.2 | MIT | below | http://github.com/mangstadt/vinnie |
 | com.github.virtuald:curvesapi | 1.08 | BSD | below | https://github.com/virtuald/curvesapi |
 | com.google.code.gson:gson | 2.15.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.google.code.gson/gson |
-| com.google.errorprone:error_prone_annotations | 2.52.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations |
+| com.google.errorprone:error_prone_annotations | 2.53.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations |
 | com.google.zxing:core | 3.5.1 | Apache-2.0 | below | https://github.com/zxing/zxing |
 | com.google.zxing:javase | 3.5.1 | Apache-2.0 | below | https://github.com/zxing/zxing |
 | com.googlecode.ez-vcard:ez-vcard | 0.12.1 | BSD-2-Clause | below | http://github.com/mangstadt/ez-vcard |
@@ -92,8 +92,8 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | com.jamonapi:jamon | 2.82 | JAMon License (BSD) | below | http://jamonapi.sourceforge.net/ |
 | com.k2fsa.sherpa.onnx:sherpa-onnx | 1.13.4 | Apache-2.0 | below | https://github.com/k2-fsa/sherpa-onnx |
 | com.knuddels:jtokkit | 1.1.0 | MIT | below | https://github.com/knuddelsgmbh/jtokkit |
-| com.microsoft.playwright:driver | 1.65.0 | Apache-2.0 | below | https://github.com/microsoft/playwright-java |
-| com.microsoft.playwright:playwright | 1.65.0 | Apache-2.0 | below | https://github.com/microsoft/playwright-java |
+| com.microsoft.playwright:driver | 1.65.1 | Apache-2.0 | below | https://github.com/microsoft/playwright-java |
+| com.microsoft.playwright:playwright | 1.65.1 | Apache-2.0 | below | https://github.com/microsoft/playwright-java |
 | com.pff:java-libpst | 0.9.3 | Apache-2.0 | below | https://github.com/rjohnsondev/java-libpst |
 | com.rometools:rome | 2.1.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.rometools/rome |
 | com.rometools:rome-utils | 2.1.0 | Apache-2.0 | below | https://central.sonatype.com/artifact/com.rometools/rome-utils |
@@ -167,26 +167,26 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | io.netty:netty-tcnative-classes | 2.0.86.Final | Apache-2.0 | below | https://github.com/netty/netty-tcnative/ |
 | io.netty:netty-transport | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
 | io.netty:netty-transport-native-unix-common | 4.2.21.Final | Apache-2.0 | below | https://netty.io/ |
-| io.opentelemetry.instrumentation:opentelemetry-instrumentation-api | 2.33.1 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
-| io.opentelemetry.instrumentation:opentelemetry-instrumentation-api-incubator | 2.33.1-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
-| io.opentelemetry.instrumentation:opentelemetry-jdbc | 2.33.1-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
-| io.opentelemetry.instrumentation:opentelemetry-okhttp-3.0 | 2.33.1-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
-| io.opentelemetry.instrumentation:opentelemetry-runtime-telemetry | 2.33.1-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
-| io.opentelemetry.semconv:opentelemetry-semconv | 1.44.0 | Apache-2.0 | below | https://github.com/open-telemetry/semantic-conventions-java |
-| io.opentelemetry:opentelemetry-api | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-api-incubator | 1.67.0-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-common | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-context | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-exporter-common | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-exporter-otlp | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-exporter-otlp-common | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-exporter-sender-okhttp | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-sdk | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-sdk-common | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-sdk-logs | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-sdk-metrics | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-sdk-testing | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
-| io.opentelemetry:opentelemetry-sdk-trace | 1.67.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry.instrumentation:opentelemetry-instrumentation-api | 2.34.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
+| io.opentelemetry.instrumentation:opentelemetry-instrumentation-api-incubator | 2.34.0-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
+| io.opentelemetry.instrumentation:opentelemetry-jdbc | 2.34.0-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
+| io.opentelemetry.instrumentation:opentelemetry-okhttp-3.0 | 2.34.0-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
+| io.opentelemetry.instrumentation:opentelemetry-runtime-telemetry | 2.34.0-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java-instrumentation |
+| io.opentelemetry.semconv:opentelemetry-semconv | 1.45.0 | Apache-2.0 | below | https://github.com/open-telemetry/semantic-conventions-java |
+| io.opentelemetry:opentelemetry-api | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-api-incubator | 1.68.0-alpha | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-common | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-context | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-exporter-common | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-exporter-otlp | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-exporter-otlp-common | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-exporter-sender-okhttp | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-sdk | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-sdk-common | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-sdk-logs | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-sdk-metrics | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-sdk-testing | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
+| io.opentelemetry:opentelemetry-sdk-trace | 1.68.0 | Apache-2.0 | below | https://github.com/open-telemetry/opentelemetry-java |
 | io.projectreactor:reactor-core | 3.8.7 | Apache-2.0 | in the jar | https://github.com/reactor/reactor-core |
 | io.prometheus:prometheus-metrics-config | 1.10.0 | Apache-2.0 | in the jar | http://github.com/prometheus/client_java |
 | io.prometheus:prometheus-metrics-core | 1.10.0 | Apache-2.0 | in the jar | http://github.com/prometheus/client_java |
@@ -315,7 +315,7 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.xhtmlrenderer:flying-saucer-core | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-core |
 | org.xhtmlrenderer:flying-saucer-pdf | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-pdf |
 | org.yaml:snakeyaml | 2.7 | Apache-2.0 | below | https://codeberg.org/snakeyaml/snakeyaml |
-| Play Framework 1.x (tsukhani/play1 fork) | 1.13.115 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
+| Play Framework 1.x (tsukhani/play1 fork) | 1.13.116 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
 | tools.jackson.core:jackson-core | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-core |
 | tools.jackson.core:jackson-databind | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
 | tools.jackson.dataformat:jackson-dataformat-cbor | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-dataformats-binary |
@@ -334,26 +334,26 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | @fontsource-variable/inter | 5.3.0 | OFL-1.1 | https://fontsource.org/fonts/inter |
 | @fontsource/caveat | 5.3.0 | OFL-1.1 | https://fontsource.org/fonts/caveat |
 | @heroicons/vue | 2.2.0 | MIT | https://github.com/tailwindlabs/heroicons#readme |
-| @lucide/vue | 1.75.0 | ISC | https://lucide.dev |
-| @tanstack/store | 0.11.2 | MIT | https://tanstack.com/store |
+| @lucide/vue | 1.78.0 | ISC | https://lucide.dev |
+| @tanstack/store | 0.11.3 | MIT | https://tanstack.com/store |
 | @tanstack/table-core | 9.3.1 | MIT | https://tanstack.com/table |
 | @tanstack/vue-table | 9.3.1 | MIT | https://tanstack.com/table |
-| @unhead/vue | 3.4.3 | MIT | https://unhead.unjs.io |
+| @unhead/vue | 3.5.0 | MIT | https://unhead.unjs.io |
 | @vitejs/plugin-vue | 6.0.11 | MIT | https://github.com/vitejs/vite-plugin-vue/tree/main/packages/plugin-vue#readme |
-| @vue/reactivity | 3.5.45 | MIT | https://github.com/vuejs/core/tree/main/packages/reactivity#readme |
-| @vue/runtime-core | 3.5.45 | MIT | https://github.com/vuejs/core/tree/main/packages/runtime-core#readme |
-| @vue/runtime-dom | 3.5.45 | MIT | https://github.com/vuejs/core/tree/main/packages/runtime-dom#readme |
-| @vue/shared | 3.5.45 | MIT | https://github.com/vuejs/core/tree/main/packages/shared#readme |
-| @vueuse/core | 14.4.0, 15.0.0 | MIT | https://github.com/vueuse/vueuse#readme |
-| @vueuse/shared | 14.4.0, 15.0.0 | MIT | https://github.com/vueuse/vueuse/tree/main/packages/shared#readme |
+| @vue/reactivity | 3.5.46 | MIT | https://github.com/vuejs/core/tree/main/packages/reactivity#readme |
+| @vue/runtime-core | 3.5.46 | MIT | https://github.com/vuejs/core/tree/main/packages/runtime-core#readme |
+| @vue/runtime-dom | 3.5.46 | MIT | https://github.com/vuejs/core/tree/main/packages/runtime-dom#readme |
+| @vue/shared | 3.5.46 | MIT | https://github.com/vuejs/core/tree/main/packages/shared#readme |
+| @vueuse/core | 14.4.0, 15.1.0 | MIT | https://github.com/vueuse/vueuse#readme |
+| @vueuse/shared | 14.4.0, 15.1.0 | MIT | https://github.com/vueuse/vueuse/tree/main/packages/shared#readme |
 | aria-hidden | 1.2.6 | MIT | https://github.com/theKashey/aria-hidden#readme |
 | class-variance-authority | 0.7.1 | Apache-2.0 | https://github.com/joe-bell/cva#readme |
 | clsx | 2.1.1 | MIT | lukeed/clsx |
-| cronstrue | 3.41.0 | MIT | https://github.com/bradymholt/cronstrue |
+| cronstrue | 3.44.0 | MIT | https://github.com/bradymholt/cronstrue |
 | defu | 6.1.7 | MIT | unjs/defu |
 | destr | 2.0.5 | MIT | unjs/destr |
 | dijkstrajs | 1.0.3 | MIT | https://github.com/tcort/dijkstrajs |
-| dompurify | 3.4.18 | (MPL-2.0 OR Apache-2.0) | https://github.com/cure53/DOMPurify |
+| dompurify | 3.5.0 | (MPL-2.0 OR Apache-2.0) | https://github.com/cure53/DOMPurify |
 | driver.js | 1.14.0 | MIT | https://driverjs.com |
 | fnv1a-64 | 0.1.2 | MIT | danielroe/fnv1a-64 |
 | h3 | 1.15.11 | MIT | h3js/h3 |
@@ -368,11 +368,11 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | qrcode | 1.5.4 | MIT | http://github.com/soldair/node-qrcode |
 | reka-ui | 2.11.0 | MIT | https://github.com/unovue/reka-ui |
 | rolldown | 1.2.19 | MIT | https://rolldown.rs/ |
-| smiles-drawer | 2.4.1 | MIT | https://github.com/reymond-group/smilesDrawer |
-| tailwind-merge | 3.7.0 | MIT | https://github.com/dcastil/tailwind-merge |
+| smiles-drawer | 2.4.2 | MIT | https://github.com/reymond-group/smilesDrawer |
+| tailwind-merge | 3.7.1 | MIT | https://github.com/dcastil/tailwind-merge |
 | tailwindcss | 4.3.5 | MIT | https://tailwindcss.com |
 | ufo | 1.6.4 | MIT | unjs/ufo |
-| unhead | 3.4.3 | MIT | https://unhead.unjs.io |
+| unhead | 3.5.0 | MIT | https://unhead.unjs.io |
 | vite | 8.3.8 | MIT | https://vite.dev |
 | vue-router | 5.5.1 | MIT | https://router.vuejs.org |
 | web-vitals | 6.2.3 | Apache-2.0 | https://github.com/GoogleChrome/web-vitals |
