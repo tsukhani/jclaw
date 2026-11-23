@@ -44,8 +44,8 @@ public class CheckListTool implements ToolRegistry.Tool {
 
     /** Sent with one model call; {@code %d} is the tool rounds run since the latest call. */
     public static final String STALE_NOTE = "Your checklist has not changed in the last %d tool rounds, and the "
-            + "operator watches it while you work. If an item has finished since, call checklist now with it "
-            + "completed and the next item in_progress; otherwise carry on.";
+            + "operator watches it while you work. If an item has finished since, mark it completed and the next "
+            + "item in_progress in your next response, beside that response's other tool calls; otherwise carry on.";
 
     @Override
     public String name() { return NAME; }
@@ -78,7 +78,8 @@ public class CheckListTool implements ToolRegistry.Tool {
                 `activeForm` (present-progressive form, e.g. "Running tests"). \
                 At most one item may be in_progress at a time (zero is also valid, e.g. before starting or after finishing). \
                 The operator watches the list while you work, so update it as each item finishes: \
-                in one call, mark that item completed and the next one in_progress, before you start the next one. \
+                mark that item completed and the next one in_progress, and send that call in the same response \
+                as the next item's first tool call, not in a response of its own. \
                 Never save several completions for one later call. \
                 Your reply ends the turn and nothing updates the list after it, so mark the last finished item completed before you write it.""";
     }
