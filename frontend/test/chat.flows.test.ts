@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
 import { fakeConversationStreams, serveTurnStart, streamOn } from './conversation-stream'
 
@@ -35,6 +35,9 @@ function setupChatApi() {
   }))
   registerEndpoint('/api/conversations', () => [])
 }
+
+// A page left mounted shares the router, so it follows a later test's ?conversation= and opens a stream for it too.
+enableAutoUnmount(afterEach)
 
 beforeEach(() => {
   registerEndpoint('/api/subagent-runs', () => [])
