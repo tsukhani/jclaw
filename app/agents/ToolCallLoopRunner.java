@@ -14,6 +14,7 @@ import org.jspecify.annotations.Nullable;
 import services.CompactionProgress;
 import services.EventLogger;
 import services.SubagentRegistry;
+import tools.CheckListTool;
 import tools.SubagentSpawnTool;
 import tools.SubagentYieldTool;
 import utils.ChannelOriginTrust;
@@ -62,7 +63,8 @@ import java.util.stream.Collectors;
  *   ({@link ContextWindowManager}), model resolution
  *   ({@link ModelResolver}), tool batch dispatch
  *   ({@link ParallelToolExecutor}), audio-rejection detection
- *   ({@link AudioRetryStrategy}), client cancellation
+ *   ({@link AudioRetryStrategy}), the note asking for a stale checklist's
+ *   update ({@link CheckListTool#staleNote}), client cancellation
  *   ({@link CancellationManager}), and message hydration
  *   ({@link MessageHydrator}).</li>
  * </ul>
@@ -219,7 +221,7 @@ public final class ToolCallLoopRunner {
             AgentRunner.checkTurnCancel(turnCancel);
             var attempt = invokeOneRound(agent, conversation, primary, fallback, effectiveModelId, thinkingMode,
                     currentMessages, tools, audioBearers, imageBearers, audioState, visionState, supportsAudioInitially,
-                    overflow, note);
+                    overflow, note != null ? note : CheckListTool.staleNote(currentMessages));
             if (attempt.retry()) {
                 currentMessages = attempt.retryMessages();
                 round--;  // re-issue this round with the rewritten messages (gated by audio/vision retryAttempted)
@@ -882,7 +884,7 @@ public final class ToolCallLoopRunner {
 
         LlmProvider.StreamAccumulator accumulator;
         try {
-            accumulator = streamContinuation(ctx, currentMessages, null);
+            accumulator = streamContinuation(ctx, currentMessages, CheckListTool.staleNote(currentMessages));
             if (accumulator != null) accumulator = resendCutOffStream(ctx, currentMessages, accumulator, round);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();

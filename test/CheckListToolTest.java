@@ -16,6 +16,7 @@ import tools.CheckListTool;
 import tools.SubagentSpawnTool;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -148,6 +149,92 @@ class CheckListToolTest extends UnitTest {
         var last = out.getLast().content();
         assertTrue(CurrentTimeInjector.isClockBlock(last), "the provider must still see the clock message");
         assertTrue(((String) last).contains(CheckListTool.REMINDER_HEADING), String.valueOf(last));
+    }
+
+    // ─── the stale-list note (JF-565) ────────────────────────────────────────
+
+    private static final String OPEN = """
+            {"items":[{"content":"Draft","status":"in_progress","activeForm":"Drafting"},
+                      {"content":"Publish","status":"pending","activeForm":"Publishing"}]}""";
+    private static final String DONE = """
+            {"items":[{"content":"Draft","status":"completed","activeForm":"Drafting"}]}""";
+
+    @Test
+    void theStaleNoteGoesAfterEveryEighthRoundSinceAnOpenListAndNeverBetween() {
+        for (int rounds = 0; rounds <= 17; rounds++) {
+            var expected = rounds == 8 || rounds == 16 ? CheckListTool.STALE_NOTE.formatted(rounds) : null;
+            assertEquals(expected, CheckListTool.staleNote(turnAfter(OPEN, rounds)), "after " + rounds + " rounds");
+        }
+    }
+
+    @Test
+    void aListWhoseItemsAreAllCompletedGetsNoNote() {
+        assertNull(CheckListTool.staleNote(turnAfter(DONE, 8)));
+    }
+
+    @Test
+    void aTurnWithNoChecklistCallGetsNoNote() {
+        var messages = new ArrayList<>(List.of(ChatMessage.user("publish it")));
+        addRounds(messages, 8);
+
+        assertNull(CheckListTool.staleNote(messages));
+    }
+
+    @Test
+    void aListSetBeforeTheTurnsQuestionGetsNoNote() {
+        var messages = new ArrayList<>(turnAfter(OPEN, 2));
+        messages.add(ChatMessage.user("now something else"));
+        addRounds(messages, 8);
+
+        assertNull(CheckListTool.staleNote(messages), "the list belongs to the earlier question");
+    }
+
+    @Test
+    void aLaterChecklistCallStartsTheCountAgain() {
+        var messages = new ArrayList<>(turnAfter(OPEN, 5));
+        messages.add(ChatMessage.assistant("", List.of(call("c2", "checklist", OPEN))));
+        messages.add(ChatMessage.toolResult("c2", "checklist", "Checklist updated successfully (2 items)."));
+        addRounds(messages, 8);
+
+        assertEquals(CheckListTool.STALE_NOTE.formatted(8), CheckListTool.staleNote(messages));
+    }
+
+    @Test
+    void aChecklistCallBesideAnotherToolStartsTheCountFromItsOwnRound() {
+        var messages = new ArrayList<>(List.of(ChatMessage.user("publish it")));
+        messages.add(ChatMessage.assistant("", List.of(call("x0", "exec", "{}"), call("c1", "checklist", OPEN))));
+        messages.add(ChatMessage.toolResult("x0", "exec", "ok"));
+        messages.add(ChatMessage.toolResult("c1", "checklist", "Checklist updated successfully (2 items)."));
+        addRounds(messages, 8);
+
+        assertEquals(CheckListTool.STALE_NOTE.formatted(8), CheckListTool.staleNote(messages));
+    }
+
+    @Test
+    void aChecklistCallWithArgumentsTheToolWouldRefuseGetsNoNote() {
+        for (var args : List.of("not json", "[]", "{\"items\":\"Draft\"}", "{\"items\":[\"Draft\"]}")) {
+            assertNull(CheckListTool.staleNote(turnAfter(args, 8)), args);
+        }
+    }
+
+    /** The question, a list set from {@code args}, then {@code rounds} tool rounds that leave it alone. */
+    private static List<ChatMessage> turnAfter(String args, int rounds) {
+        var messages = new ArrayList<>(List.of(ChatMessage.user("publish it")));
+        messages.add(ChatMessage.assistant("", List.of(call("c1", "checklist", args))));
+        messages.add(ChatMessage.toolResult("c1", "checklist", "Checklist updated successfully (2 items)."));
+        addRounds(messages, rounds);
+        return messages;
+    }
+
+    private static void addRounds(List<ChatMessage> messages, int rounds) {
+        for (int i = 1; i <= rounds; i++) {
+            messages.add(ChatMessage.assistant("", List.of(call("x" + i, "exec", "{}"))));
+            messages.add(ChatMessage.toolResult("x" + i, "exec", "ok"));
+        }
+    }
+
+    private static ToolCall call(String id, String name, String args) {
+        return new ToolCall(id, "function", new FunctionCall(name, args));
     }
 
     private void storeTwoItems(Instant updatedAt) {

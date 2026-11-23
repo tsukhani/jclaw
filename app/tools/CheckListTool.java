@@ -9,6 +9,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.ToolCall;
 import models.Agent;
 import models.Conversation;
 import models.Message;
@@ -33,6 +34,18 @@ public class CheckListTool implements ToolRegistry.Tool {
 
     /** User messages a stored list may go without an update before {@link #reminder} treats it as abandoned. */
     public static final int ABANDONED_AFTER_USER_MESSAGES = 3;
+
+    /**
+     * Tool rounds after the turn's latest call, with an item still open, before {@link #staleNote} asks for an
+     * update. On 2026-11-23 a flash model set a 7-item list, ran 44 tool rounds and marked all 7 completed in one
+     * call before its reply, so the chat showed step 1 running throughout; its steps took about 7 rounds each.
+     */
+    public static final int STALE_AFTER_ROUNDS = 8;
+
+    /** Sent with one model call; {@code %d} is the tool rounds run since the latest call. */
+    public static final String STALE_NOTE = "Your checklist has not changed in the last %d tool rounds, and the "
+            + "operator watches it while you work. If an item has finished since, call checklist now with it "
+            + "completed and the next item in_progress; otherwise carry on.";
 
     @Override
     public String name() { return NAME; }
@@ -64,7 +77,10 @@ public class CheckListTool implements ToolRegistry.Tool {
                 `status` (one of pending, in_progress, completed), and \
                 `activeForm` (present-progressive form, e.g. "Running tests"). \
                 At most one item may be in_progress at a time (zero is also valid, e.g. before starting or after finishing). \
-                Your reply ends the turn and nothing updates the list after it, so mark finished items completed before you write it.""";
+                The operator watches the list while you work, so update it as each item finishes: \
+                in one call, mark that item completed and the next one in_progress, before you start the next one. \
+                Never save several completions for one later call. \
+                Your reply ends the turn and nothing updates the list after it, so mark the last finished item completed before you write it.""";
     }
 
     @Override
@@ -171,9 +187,55 @@ public class CheckListTool implements ToolRegistry.Tool {
                 + lines;
     }
 
+    /**
+     * {@link #STALE_NOTE} for the next model call, or null. It goes when the turn's latest {@code checklist} call
+     * left an item open and a multiple of {@link #STALE_AFTER_ROUNDS} tool rounds have run since, counting
+     * back from the end of {@code messages}. A list set before the latest user-role message, the turn's question
+     * or the clock message after it, belongs to an earlier question, so it never prompts one.
+     */
+    public static @Nullable String staleNote(List<ChatMessage> messages) {
+        int rounds = 0;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            var m = messages.get(i);
+            if (MessageRole.USER.value.equals(m.role())) return null;
+            var calls = m.toolCalls();
+            if (calls == null || calls.isEmpty()) continue;
+            var latest = latestCall(calls);
+            if (latest == null) {
+                rounds++;
+                continue;
+            }
+            var items = callItems(latest);
+            boolean due = rounds > 0 && rounds % STALE_AFTER_ROUNDS == 0 && items != null && hasOpenItem(items);
+            return due ? STALE_NOTE.formatted(rounds) : null;
+        }
+        return null;
+    }
+
+    private static @Nullable ToolCall latestCall(List<ToolCall> calls) {
+        for (int i = calls.size() - 1; i >= 0; i--) {
+            if (NAME.equals(calls.get(i).function().name())) return calls.get(i);
+        }
+        return null;
+    }
+
+    /** The items a call's arguments carry, or null when the model sent something the tool would refuse. */
+    private static @Nullable JsonArray callItems(ToolCall call) {
+        try {
+            var args = JsonParser.parseString(call.function().arguments());
+            if (!args.isJsonObject()) return null;
+            var items = args.getAsJsonObject().get(SchemaKeys.ITEMS);
+            return items != null && items.isJsonArray() ? items.getAsJsonArray() : null;
+        } catch (JsonParseException _) {
+            return null;
+        }
+    }
+
     private static boolean hasOpenItem(JsonArray items) {
         for (var el : items) {
-            if (!"completed".equals(JsonArgs.optString(el.getAsJsonObject(), FIELD_STATUS, "pending"))) return true;
+            if (el.isJsonObject() && !"completed".equals(JsonArgs.optString(el.getAsJsonObject(), FIELD_STATUS, "pending"))) {
+                return true;
+            }
         }
         return false;
     }
