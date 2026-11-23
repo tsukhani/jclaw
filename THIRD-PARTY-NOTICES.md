@@ -315,7 +315,7 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.xhtmlrenderer:flying-saucer-core | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-core |
 | org.xhtmlrenderer:flying-saucer-pdf | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-pdf |
 | org.yaml:snakeyaml | 2.7 | Apache-2.0 | below | https://codeberg.org/snakeyaml/snakeyaml |
-| Play Framework 1.x (tsukhani/play1 fork) | 1.13.112 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
+| Play Framework 1.x (tsukhani/play1 fork) | 1.13.113 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
 | tools.jackson.core:jackson-core | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-core |
 | tools.jackson.core:jackson-databind | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
 | tools.jackson.dataformat:jackson-dataformat-cbor | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-dataformats-binary |
@@ -2612,7 +2612,6 @@ Apache License 2.0
     - jakarta.inject-api
 
 Eclipse Public License 2.0
-    - Eclipse JDT Core / ECJ (org.eclipse.jdt.core, ecj)
     - JUnit 5 Jupiter (api, engine, params)
     - Jakarta Activation API
     - Jakarta Mail

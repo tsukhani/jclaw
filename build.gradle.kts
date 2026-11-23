@@ -789,8 +789,8 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
 // drops it and fetches its own host's on first use (services.voice.SherpaNative, JF-188). Docker
 // builds its bundle for one -PtargetArch and keeps that platform's.
 // framework/lib also carries the fork's test runner and build tools: JUnit and its companions
-// for play autotest, ECJ for compiling sources (a bundle ships none and starts precompiled), and
-// Ivy for resolving framework/dependencies.yml or an app's conf/dependencies.yml (JClaw has none).
+// for play autotest, and Ivy for resolving framework/dependencies.yml or an app's
+// conf/dependencies.yml (JClaw has none).
 // Dev, tests and `play run` keep the jars on the classpath. playBundle fills both lib/ and the
 // launcher's .classpath from playClasspath, and framework/lib/ and its .classpath entries from
 // frameworkLib, so filtering each keeps a jar out of both.
@@ -799,7 +799,7 @@ tasks.named<play.gradle.PlayBundleTask>("playBundle") {
     val excludedJarPrefixes = listOf("driver-bundle-", "archunit-", "jetCheck-", "mockwebserver3-") +
         if (forOneTarget) emptyList() else listOf("sherpa-onnx-native-lib-")
     val excludedFrameworkJarPrefixes = listOf(
-        "junit-jupiter-", "junit-platform-", "hamcrest-", "opentest4j-", "apiguardian-api-", "ecj-", "ivy-",
+        "junit-jupiter-", "junit-platform-", "hamcrest-", "opentest4j-", "apiguardian-api-", "ivy-",
     )
     // Snapshot the sources first: filtering a collection into itself would be circular.
     val resolved = files(playClasspath.from.toList())
