@@ -303,7 +303,7 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.netpreserve:jwarc | 0.37.0 | Apache-2.0 | below | https://github.com/iipc/jwarc |
 | org.nibor.autolink:autolink | 0.6.0 | MIT | below | https://github.com/robinst/autolink-java |
 | org.ow2.asm:asm | 9.11.1 | BSD-3-Clause | below | http://asm.ow2.io/ |
-| org.postgresql:postgresql | 42.7.14 | BSD-2-Clause | in the jar | https://jdbc.postgresql.org |
+| org.postgresql:postgresql | 42.7.15 | BSD-2-Clause | in the jar | https://jdbc.postgresql.org |
 | org.reactivestreams:reactive-streams | 1.0.4 | MIT-0 | below | http://www.reactive-streams.org/ |
 | org.slf4j:slf4j-api | 2.0.20 | MIT | in the jar | http://www.slf4j.org |
 | org.snakeyaml:snakeyaml-engine | 3.2 | Apache-2.0 | below | https://codeberg.org/snakeyaml/snakeyaml-engine |
@@ -315,7 +315,7 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | org.xhtmlrenderer:flying-saucer-core | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-core |
 | org.xhtmlrenderer:flying-saucer-pdf | 9.4.0 | LGPL-2.1 | in the jar | https://central.sonatype.com/artifact/org.xhtmlrenderer/flying-saucer-pdf |
 | org.yaml:snakeyaml | 2.7 | Apache-2.0 | below | https://codeberg.org/snakeyaml/snakeyaml |
-| Play Framework 1.x (tsukhani/play1 fork) | 1.13.113 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
+| Play Framework 1.x (tsukhani/play1 fork) | 1.13.114 | Apache-2.0 | below | https://github.com/tsukhani/play1 |
 | tools.jackson.core:jackson-core | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-core |
 | tools.jackson.core:jackson-databind | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson |
 | tools.jackson.dataformat:jackson-dataformat-cbor | 3.3.0 | Apache-2.0 | in the jar | https://github.com/FasterXML/jackson-dataformats-binary |
