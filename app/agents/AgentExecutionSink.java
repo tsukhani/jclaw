@@ -110,12 +110,14 @@ public interface AgentExecutionSink {
      * @param content     assistant text (typically {@code null} for a pure tool-call dispatch)
      * @param toolCalls   JSON-encoded tool-call list
      * @param attachments the produced attachments to inline, in order; empty for an ordinary tool call
+     * @param roundText   what the model wrote in the round, on its first stored call only, else {@code null};
+     *                    the default drops it, as it drops the attachments
      * @return the persisted {@link models.MessageAttachment} rows (so the caller can surface them on
      *         the live SSE {@code tool_call} frame), empty when nothing was inlined
      */
     default List<MessageAttachment> appendAssistantMessage(
             @Nullable String content, @Nullable String toolCalls,
-            List<GeneratedAttachment> attachments) {
+            List<GeneratedAttachment> attachments, @Nullable String roundText) {
         appendAssistantMessage(content, toolCalls);
         return List.of();
     }
@@ -127,11 +129,12 @@ public interface AgentExecutionSink {
      * create the placeholder via {@code AttachmentService.createGeneratedVideoPlaceholder} so the chat
      * shows a generating card the runner later fills.
      *
+     * @param roundText what the model wrote in the round, on its first stored call only, else {@code null}
      * @return the persisted placeholder {@link MessageAttachment} (so the caller can surface it on the
      *         live SSE {@code tool_call} frame), or {@code null} otherwise
      */
     default @Nullable MessageAttachment appendVideoPlaceholder(@Nullable String content,
-            @Nullable String toolCalls, ToolRegistry.VideoJobRef videoJob) {
+            @Nullable String toolCalls, ToolRegistry.VideoJobRef videoJob, @Nullable String roundText) {
         appendAssistantMessage(content, toolCalls);
         return null;
     }

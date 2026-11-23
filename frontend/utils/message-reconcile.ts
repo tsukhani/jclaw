@@ -119,7 +119,8 @@ interface WindowRow {
 }
 
 function sameToolCalls(a: ToolCall[], b: ToolCall[]): boolean {
-  return a.length === b.length && a.every((tc, i) => tc.id === b[i]!.id && tc.resultText === b[i]!.resultText)
+  return a.length === b.length && a.every((tc, i) => tc.id === b[i]!.id && tc.resultText === b[i]!.resultText
+    && (tc.roundText ?? null) === (b[i]!.roundText ?? null))
 }
 
 // A partial window hydrates only its own rows, so a shown row's calls from before it would be dropped: keep them on

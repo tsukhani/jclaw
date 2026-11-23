@@ -13,6 +13,23 @@ import { hydrateToolCalls, settledRowId, turnWindowStart } from '~/utils/tool-ca
  *     actual content (the final response), not on the intermediate row.
  */
 describe('hydrateToolCalls', () => {
+  it('carries a tool-call row\'s round text onto its call, and none onto a call whose row has none (JF-568)', () => {
+    const call = (id: string) => [{ id, type: 'function', function: { name: 'exec', arguments: '{}' } }]
+    const msgs = [
+      { role: 'user', content: 'publish', id: 1 },
+      { role: 'assistant', id: 2, content: null, roundText: 'Checking both sites first.', toolCalls: call('a') },
+      { role: 'tool', id: 3, content: 'a done', toolResults: 'a' },
+      { role: 'assistant', id: 4, content: null, toolCalls: call('b') },
+      { role: 'tool', id: 5, content: 'b done', toolResults: 'b' },
+      { role: 'assistant', id: 6, content: 'Both drafts are up.' },
+    ]
+
+    hydrateToolCalls(msgs as unknown as Array<Record<string, unknown>>)
+
+    const reply = msgs[5] as unknown as { toolCalls: Array<{ id: string, roundText?: string | null }> }
+    expect(reply.toolCalls.map(tc => [tc.id, tc.roundText ?? null])).toEqual([['a', 'Checking both sites first.'], ['b', null]])
+  })
+
   it('folds tool-row results onto the next assistant content row', () => {
     const msgs = [
       { role: 'user', content: 'search please', id: 1 },

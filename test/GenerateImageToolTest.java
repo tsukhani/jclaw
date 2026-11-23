@@ -29,7 +29,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   <li>The tool calls the configured ImageGenerationService and returns the produced bytes on the
  *       {@link agents.ToolRegistry.ToolResult} (happy path), or a typed text error when generation is
  *       unconfigured (no image, no throw).</li>
- *   <li>{@link ConversationSink#appendAssistantMessage(String, String, List)} inlines a
+ *   <li>{@link ConversationSink#appendAssistantMessage(String, String, List, String)} inlines a
  *       produced image onto the assistant turn as a {@code generated=true} IMAGE attachment — the
  *       integration the tool-call commit path relies on.</li>
  * </ul>
@@ -157,7 +157,7 @@ class GenerateImageToolTest extends UnitTest {
         var meta = "{\"prompt\":\"a cat\",\"generatedBy\":\"openai:gpt-image-1\"}";
 
         var returned = new ConversationSink(conv).appendAssistantMessage(
-                null, "[]", java.util.List.of(new GeneratedAttachment(bytes, "image/png", meta)));
+                null, "[]", java.util.List.of(new GeneratedAttachment(bytes, "image/png", meta)), null);
         // JCLAW-228: the sink returns the persisted rows so the runner can ship them on the live SSE frame.
         assertEquals(1, returned.size(), "the sink must return the persisted attachment for the live tool_call frame");
         assertTrue(returned.get(0).generated);

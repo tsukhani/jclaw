@@ -1,6 +1,7 @@
 package agents;
 
 import models.Conversation;
+import models.Message;
 import models.MessageAttachment;
 import models.PendingInbound;
 import models.VideoGenerationJob;
@@ -211,14 +212,14 @@ public class ConversationSink implements AgentExecutionSink {
     @Override
     public List<MessageAttachment> appendAssistantMessage(
             @Nullable String content, @Nullable String toolCalls,
-            List<GeneratedAttachment> attachments) {
+            List<GeneratedAttachment> attachments, @Nullable String roundText) {
         if (dropping()) return List.of();
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
             return List.of();
         }
-        var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);
+        var msg = appendToolCallRow(managed, content, toolCalls, roundText);
         // JCLAW-228/562: inline every tool-produced attachment on the ONE assistant turn that
         // carried the call, and return the rows so the runner can push them onto the live SSE
         // tool_call frame.
@@ -232,14 +233,14 @@ public class ConversationSink implements AgentExecutionSink {
 
     @Override
     public @Nullable MessageAttachment appendVideoPlaceholder(@Nullable String content,
-            @Nullable String toolCalls, ToolRegistry.VideoJobRef videoJob) {
+            @Nullable String toolCalls, ToolRegistry.VideoJobRef videoJob, @Nullable String roundText) {
         if (dropping()) return null;
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
             return null;
         }
-        var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);
+        var msg = appendToolCallRow(managed, content, toolCalls, roundText);
         if (videoJob == null || videoJob.jobId() == null) {
             return null;
         }
@@ -255,6 +256,16 @@ public class ConversationSink implements AgentExecutionSink {
         // on the live SSE tool_call frame (which starts the frontend's progress poll).
         return AttachmentService.createGeneratedVideoPlaceholder(
                 managed.agent, msg, videoJob.jobId(), videoJob.generationMetadata());
+    }
+
+    private static Message appendToolCallRow(Conversation managed, @Nullable String content,
+                                             @Nullable String toolCalls, @Nullable String roundText) {
+        var msg = ConversationService.appendAssistantMessage(managed, content, toolCalls);
+        if (roundText != null) {
+            msg.roundText = roundText;
+            msg.save();
+        }
+        return msg;
     }
 
     @Override

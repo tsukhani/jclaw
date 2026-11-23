@@ -202,7 +202,7 @@ class GenerateVideoToolTest extends UnitTest {
         job.save();
 
         var returned = new ConversationSink(conv).appendVideoPlaceholder(
-                null, "[]", new ToolRegistry.VideoJobRef(job.id, "{\"prompt\":\"a comet\"}"));
+                null, "[]", new ToolRegistry.VideoJobRef(job.id, "{\"prompt\":\"a comet\"}"), null);
 
         assertNotNull(returned, "the sink must return the placeholder for the live tool_call frame");
         assertTrue(returned.generated);

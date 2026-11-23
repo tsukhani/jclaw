@@ -59,6 +59,7 @@ class ApiConversationsControllerSchemaDriftTest extends UnitTest {
         msg.toolResults = "call-1";
         msg.toolResultStructured = "{}";
         msg.reasoning = "thinking";
+        msg.roundText = "Checking both sites first.";
         msg.createdAt = Instant.now();
         msg.usageJson = "{}";
         msg.subagentRunId = 7L;

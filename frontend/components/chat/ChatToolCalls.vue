@@ -171,6 +171,13 @@ function onFaviconError(ev: Event) {
         :key="tc.id"
         class="border-b border-neutral-100 dark:border-neutral-800 last:border-b-0"
       >
+        <p
+          v-if="tc.roundText"
+          data-testid="tool-call-round-text"
+          class="px-3 pt-3 text-sm text-fg-primary whitespace-pre-line break-words"
+        >
+          {{ tc.roundText }}
+        </p>
         <button
           type="button"
           class="w-full flex items-center gap-2 px-3 py-3 text-left text-sm text-fg-muted hover:text-fg-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default disabled:hover:text-fg-muted"

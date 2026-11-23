@@ -240,7 +240,8 @@ public final class ParallelToolExecutor {
             ConversationService.persistReadOutsideContent(conversationId);
         }
 
-        commitToolResults(toolCalls, results, currentMessages, onToolCall, imageCollector, sink);
+        commitToolResults(toolCalls, results, currentMessages, onToolCall, imageCollector, sink,
+                roundText(currentMessages, toolCalls));
         var yieldedOn = new ArrayList<Long>();
         for (int i = 0; i < n; i++) {
             var result = results[i];
@@ -468,6 +469,19 @@ public final class ParallelToolExecutor {
     }
 
     /**
+     * What the model wrote alongside {@code toolCalls}, or null when it wrote nothing. Both loops append the round's
+     * assistant message, its text and these calls, to {@code currentMessages} just before calling here; anything
+     * else there means no text of this round's, so none is stored.
+     */
+    private static @Nullable String roundText(List<ChatMessage> currentMessages, List<ToolCall> toolCalls) {
+        if (currentMessages.isEmpty()) return null;
+        var round = currentMessages.getLast();
+        if (!toolCalls.equals(round.toolCalls())) return null;
+        var text = MessageHydrator.contentAsString(round.content());
+        return text.isBlank() ? null : text;
+    }
+
+    /**
      * Commit phase: append to message history and persist to DB in
      * original order, preserving LLM tool_result ordering invariants.
      *
@@ -479,14 +493,17 @@ public final class ParallelToolExecutor {
     private static void commitToolResults(List<ToolCall> toolCalls, ToolRegistry.ToolResult[] results,
                                           List<ChatMessage> currentMessages,
                                           @Nullable Consumer<AgentRunner.ToolCallEvent> onToolCall,
-                                          @Nullable List<String> imageCollector, AgentExecutionSink sink) {
+                                          @Nullable List<String> imageCollector, AgentExecutionSink sink,
+                                          @Nullable String roundText) {
         var frames = new ArrayList<AgentRunner.ToolCallEvent>();
         var frameSink = onToolCall != null ? frames : null;
         boolean committed = sink.commit(() -> {
+            var unstored = roundText;
             for (int i = 0; i < toolCalls.size(); i++) {
                 var result = results[i];
                 if (result == null) continue; // skipped due to cancellation
-                commitOneResult(toolCalls.get(i), result, currentMessages, imageCollector, sink, frameSink);
+                commitOneResult(toolCalls.get(i), result, currentMessages, imageCollector, sink, frameSink, unstored);
+                unstored = null;
             }
         });
         // JCLAW-170: surface the completed calls to the SSE stream so the
@@ -505,7 +522,8 @@ public final class ParallelToolExecutor {
                                         List<ChatMessage> currentMessages,
                                         @Nullable List<String> imageCollector,
                                         AgentExecutionSink sink,
-                                        @Nullable List<AgentRunner.ToolCallEvent> frameSink) {
+                                        @Nullable List<AgentRunner.ToolCallEvent> frameSink,
+                                        @Nullable String roundText) {
         var text = result.text();
         var structured = result.structuredJson();
         // JCLAW-836 stage 1: judge the result, do not change it. The model still
@@ -529,10 +547,10 @@ public final class ParallelToolExecutor {
         // sink creates a zero-byte placeholder linked to it; every other tool takes the
         // attachments path (no-op for ordinary calls).
         if (videoJob != null) {
-            var placeholder = sink.appendVideoPlaceholder(null, gson.toJson(tc), videoJob);
+            var placeholder = sink.appendVideoPlaceholder(null, gson.toJson(tc), videoJob, roundText);
             persisted = placeholder != null ? List.of(placeholder) : List.of();
         } else {
-            persisted = sink.appendAssistantMessage(null, gson.toJson(tc), result.attachments());
+            persisted = sink.appendAssistantMessage(null, gson.toJson(tc), result.attachments(), roundText);
         }
         sink.appendToolResult(tc.id(), text, structured);
         // JCLAW-883: the sink already has the name (from the assistant turn

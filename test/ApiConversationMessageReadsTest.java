@@ -89,6 +89,7 @@ class ApiConversationMessageReadsTest extends FunctionalTest {
                 m -> {
                     m.role = MessageRole.ASSISTANT.value;
                     m.reasoning = "r".repeat(BOUND);
+                    m.roundText = "n".repeat(BOUND);
                     m.toolCalls = toolCall("t".repeat(BOUND));
                 },
                 m -> {
@@ -111,6 +112,7 @@ class ApiConversationMessageReadsTest extends FunctionalTest {
         assertEquals(3, rows.size());
         var assistant = rows.get(0).getAsJsonObject();
         assertEquals("r".repeat(BOUND), assistant.get("reasoning").getAsString());
+        assertEquals("n".repeat(BOUND), assistant.get("roundText").getAsString());
         assertEquals("t".repeat(BOUND), arguments(assistant));
         assertEquals(jsonOfLength(BOUND), rows.get(1).getAsJsonObject().get("toolResultStructured").toString());
         assertEquals(jsonOfLength(BOUND), rows.get(2).getAsJsonObject().get("metadata").toString());
@@ -124,6 +126,7 @@ class ApiConversationMessageReadsTest extends FunctionalTest {
                 m -> {
                     m.role = MessageRole.ASSISTANT.value;
                     m.reasoning = "r".repeat(BOUND) + "s";
+                    m.roundText = "n".repeat(BOUND) + "o";
                     m.toolCalls = toolCall("t".repeat(BOUND) + "u");
                 },
                 m -> {
@@ -146,10 +149,11 @@ class ApiConversationMessageReadsTest extends FunctionalTest {
         assertEquals(3, rows.size());
         var assistant = rows.get(0).getAsJsonObject();
         assertEquals("r".repeat(BOUND) + "…", assistant.get("reasoning").getAsString());
+        assertEquals("n".repeat(BOUND) + "…", assistant.get("roundText").getAsString());
         assertEquals("t".repeat(BOUND) + "…", arguments(assistant));
         assertEquals("web_search", assistant.getAsJsonArray("toolCalls").get(0).getAsJsonObject()
                 .getAsJsonObject("function").get("name").getAsString());
-        assertEquals(List.of("reasoning", "toolCalls"), strings(assistant.getAsJsonArray("cut")));
+        assertEquals(List.of("reasoning", "roundText", "toolCalls"), strings(assistant.getAsJsonArray("cut")));
         var tool = rows.get(1).getAsJsonObject();
         assertFalse(tool.has("toolResultStructured"), tool.toString());
         assertEquals("done", tool.get("content").getAsString());
@@ -292,6 +296,35 @@ class ApiConversationMessageReadsTest extends FunctionalTest {
     }
 
     // --- one message whole -----------------------------------------------------------------------
+
+    @Test
+    void theOperatorsPageCarriesARoundsTextOnItsToolCallRowAndNoOtherRow() {
+        var s = seedRows(
+                m -> {
+                    m.role = MessageRole.ASSISTANT.value;
+                    m.roundText = "Checking both sites first.";
+                    m.toolCalls = toolCall("{}");
+                },
+                m -> {
+                    m.role = MessageRole.TOOL.value;
+                    m.toolResults = "call_1";
+                    m.content = "done";
+                },
+                m -> {
+                    m.role = MessageRole.ASSISTANT.value;
+                    m.content = "Both drafts are up.";
+                });
+        login();
+
+        var resp = GET("/api/conversations/" + s.conversationId() + "/messages");
+
+        assertStatus(200, resp);
+        var rows = rows(resp);
+        assertEquals(3, rows.size());
+        assertEquals("Checking both sites first.", rows.get(0).getAsJsonObject().get("roundText").getAsString());
+        assertFalse(rows.get(1).getAsJsonObject().has("roundText"), rows.get(1).toString());
+        assertFalse(rows.get(2).getAsJsonObject().has("roundText"), rows.get(2).toString());
+    }
 
     @Test
     void theOwningAgentReadsOneMessageWhole() {

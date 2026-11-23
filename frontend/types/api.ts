@@ -412,6 +412,8 @@ export interface ToolCall {
   arguments: string
   resultText?: string | null
   resultStructured?: ToolCallResultStructured | null
+  /** What the model wrote in the round, on that round's first call only; shown above the call. */
+  roundText?: string | null
   /** Client-only: whether this individual tool call's body (chip grid or
    *  result text) is expanded under the per-call header (JCLAW-170). */
   _expanded?: boolean
@@ -481,6 +483,8 @@ export interface Message {
   role: 'user' | 'assistant' | 'tool'
   content: string | null
   reasoning?: string | null
+  /** On a round's first tool-call row: what the model wrote in that round, which hydration moves onto the call. */
+  roundText?: string | null
   createdAt: string
   usage?: MessageUsage | null
   /** JCLAW-170: tool invocations on this assistant turn, hydrated from the

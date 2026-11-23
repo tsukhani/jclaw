@@ -31,6 +31,16 @@ describe('ChatToolCalls (JCLAW-170)', () => {
     const rows = c.findAll('button').filter(b => b.text().startsWith('Used tool:'))
     expect(rows.map(r => r.text())).toEqual(['Used tool: subagent_yield · all: true', 'Used tool: datetime'])
   })
+  it('shows a call\'s round text above it, and nothing for a call without one (JF-568)', async () => {
+    const calls = [tc({ id: 'a', roundText: 'Checking both sites first.' }), tc({ id: 'b' })]
+    const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: calls, collapsed: false } })
+    expect(c.findAll('[data-testid="tool-call-round-text"]').map(n => n.text())).toEqual(['Checking both sites first.'])
+    expect(c.text().indexOf('Checking both sites first.')).toBeLessThan(c.text().indexOf('Searched "cats"'))
+  })
+  it('hides a call\'s round text with its row when collapsed', async () => {
+    const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: [tc({ roundText: 'Checking both sites first.' })], collapsed: true } })
+    expect(c.text()).not.toContain('Checking both sites first.')
+  })
   it('hides the call rows when collapsed', async () => {
     const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: [tc()], collapsed: true } })
     expect(c.text()).not.toContain('Searched "cats"')

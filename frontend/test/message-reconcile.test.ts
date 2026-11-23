@@ -230,6 +230,19 @@ describe('reconcileWindow', () => {
     expect(merged.changed).toBe(true)
   })
 
+  it('gives a shown call the round text its saved row brings, as the merge at a turn\'s end does (JF-568)', () => {
+    const reply = m({ id: 4, role: 'assistant', content: 'Both drafts are up.', toolCalls: [shownCall('a', true)], toolCallsCollapsed: false })
+    const shown = [m({ id: 1, role: 'user', content: 'publish' }), reply]
+    const fresh = [m({ id: 1, role: 'user', content: 'publish' }), m({ ...callRow(2, 'a'), roundText: 'Checking both sites first.' }),
+      resultRow(3, 'a'), m({ id: 4, role: 'assistant', content: 'Both drafts are up.' })]
+
+    const merged = reconcileWindow(shown, fresh, false)
+
+    expect(reply.toolCalls!.map(tc => [tc.id, tc.roundText, tc._expanded])).toEqual([['a', 'Checking both sites first.', true]])
+    expect(reply.toolCallsCollapsed).toBe(false)
+    expect(merged.changed).toBe(true)
+  })
+
   it('moves a shown row\'s calls to the newer row a whole window hangs them on', () => {
     const shown = [
       m({ id: 1, role: 'user', content: 'go' }),

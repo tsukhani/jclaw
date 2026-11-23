@@ -98,6 +98,14 @@ public class Message extends Model {
     public String reasoning;
 
     /**
+     * The text the model wrote in the round whose first stored tool call this row is, so the chat can show it
+     * beside that call once the turn has ended. Null on every other row. It is kept out of {@link #content}, which
+     * the chat's reload and the model's history read as a reply, so the model never gets it back.
+     */
+    @Column(name = "round_text", columnDefinition = "TEXT")
+    public String roundText;
+
+    /**
      * JCLAW-270: discriminator for non-LLM-confusing system-role messages that
      * the chat UI should render as a structured card rather than as an opaque
      * system prompt. E.g. {@code "subagent_announce"} for async-spawn

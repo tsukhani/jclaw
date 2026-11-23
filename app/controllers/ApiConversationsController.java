@@ -73,6 +73,7 @@ public class ApiConversationsController extends Controller {
     private static final String CREATED_AT = "createdAt";
     private static final String THINKING_MODE = "thinkingMode";
     private static final String KEY_TOOL_CALLS = "toolCalls";
+    private static final String KEY_ROUND_TEXT = "roundText";
     private static final String KEY_TOOL_RESULT_STRUCTURED = "toolResultStructured";
     private static final String KEY_METADATA = "metadata";
     // Conversation.preview is @Column(length = 100), so a longer name cannot be stored.
@@ -110,6 +111,8 @@ public class ApiConversationsController extends Controller {
      * @param toolResultStructured optional structured payload for richer UI
      *                             rendering (search-result chips etc.)
      * @param reasoning            chain-of-thought text for thinking models
+     * @param roundText            what the model wrote in the round, on
+     *                             that round's first tool-call row only
      * @param createdAt            ISO-8601 timestamp
      * @param usage                token-usage JSON for assistant rows
      * @param subagentRunId        when this row was produced by a subagent,
@@ -128,7 +131,7 @@ public class ApiConversationsController extends Controller {
     public record MessageView(Long id, String role, String content,
                               JsonElement toolCalls, String toolResults,
                               JsonElement toolResultStructured,
-                              String reasoning, String createdAt,
+                              String reasoning, String roundText, String createdAt,
                               JsonElement usage,
                               Long subagentRunId,
                               String messageKind,
@@ -567,7 +570,7 @@ public class ApiConversationsController extends Controller {
     }
 
     /**
-     * Cut one row for an agent's page: its content, reasoning and each tool call's arguments to {@link
+     * Cut one row for an agent's page: its content, reasoning, round text and each tool call's arguments to {@link
      * #MESSAGE_EXCERPT_CHARS} by {@link Strings#truncate}. A structured result or metadata whose JSON runs longer
      * would no longer parse once cut, so it is left out. {@code cut} names each field cut or left out, and is absent
      * when none was.
@@ -576,7 +579,7 @@ public class ApiConversationsController extends Controller {
      */
     private static boolean cutForAgent(Map<String, Object> row) {
         var cut = new ArrayList<String>();
-        for (var key : List.of("content", "reasoning")) {
+        for (var key : List.of("content", "reasoning", KEY_ROUND_TEXT)) {
             if (row.get(key) instanceof String text && text.length() > MESSAGE_EXCERPT_CHARS) {
                 row.put(key, Strings.truncate(text, MESSAGE_EXCERPT_CHARS));
                 cut.add(key);
@@ -735,6 +738,7 @@ public class ApiConversationsController extends Controller {
         // re-renders identically after a conversation reload. Null for
         // assistant turns without thinking and for user/tool rows.
         if (m.reasoning != null) map.put("reasoning", m.reasoning);
+        if (m.roundText != null) map.put(KEY_ROUND_TEXT, m.roundText);
         map.put(CREATED_AT, m.createdAt.toString());
         if (m.usageJson != null) {
             map.put("usage", JsonParser.parseString(m.usageJson));

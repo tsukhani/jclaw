@@ -7,7 +7,8 @@ import type { ToolCall, ToolCallResultStructured } from '~/types/api'
  * Backend persistence shape (emitted by
  * {@code /api/conversations/:id/messages}):
  *
- *  1. assistant row with {@code content: null, toolCalls: [persisted-tool-call-objects]}
+ *  1. assistant row with {@code content: null, toolCalls: [persisted-tool-call-objects]}, and on a
+ *     round's first call {@code roundText}, what the model wrote in that round
  *  2. tool row per call with {@code content: "result text", toolResults:
  *     "<tool_call_id>", toolResultStructured: {...} | undefined}
  *  3. assistant row with the final response {@code content}.
@@ -39,6 +40,7 @@ interface RawRow {
   toolCalls?: PersistedToolCall[] | ToolCall[] | null
   toolResults?: string | null
   toolResultStructured?: ToolCallResultStructured | null
+  roundText?: string | null
   /** JCLAW-228: generate_image persists its produced image on the
    *  intermediate (content-null) assistant row alongside the tool call.
    *  That row gets filtered, so its attachments are carried onto the
@@ -152,7 +154,10 @@ function pendingIsEmpty(p: Pending): boolean {
  */
 function drainIntermediateRow(m: RawRow, resultsByCallId: ResultsByCallId, pending: Pending): void {
   if (!Array.isArray(m.toolCalls)) return
-  pending.calls.push(...collectNormalizedCalls(m.toolCalls, resultsByCallId))
+  const calls = collectNormalizedCalls(m.toolCalls, resultsByCallId)
+  // The row is filtered out of the transcript, so its round's text rides forward on the call it came before.
+  if (m.roundText && calls[0]) calls[0].roundText = m.roundText
+  pending.calls.push(...calls)
   m.toolCalls = null
   if (Array.isArray(m.attachments) && m.attachments.length) {
     pending.attachments.push(...m.attachments)
