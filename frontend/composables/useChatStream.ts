@@ -90,6 +90,17 @@ interface OpenTurn {
   bubble: StreamingMessage
   initId: string
   turnId: number | null
+  /** A tool call came since the bubble's last text, so the next text is a later round's. */
+  callSinceText?: boolean
+}
+
+/**
+ * What goes between the shown text and a later round's first text. A token carries no mark of the round it
+ * belongs to, so without this the two rounds' sentences run together ("reused downstream.Inputs validate").
+ */
+function roundBreak(shown: string, next: string): string {
+  if (!shown || shown.endsWith('\n\n') || /^\s/.test(next)) return ''
+  return shown.endsWith('\n') ? '\n' : '\n\n'
 }
 
 /** A `/compact` this tab sent, until its answer: `ended` once the bus has said how it ended. */
@@ -657,6 +668,10 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     const transitioned = finalizeThinkingOnTransition(m)
     streamStatus.value = ''
     if (event.timestamp) m.createdAt = event.timestamp
+    if (turn?.callSinceText) {
+      streamContent.value += roundBreak(streamContent.value, event.content)
+      turn.callSinceText = false
+    }
     streamContent.value += event.content
     m.content = streamContent.value
     scheduleStreamContentRender()
@@ -675,6 +690,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   }
 
   function handleStreamToolCallEvent(m: StreamingMessage, event: ToolCallEvent) {
+    if (turn) turn.callSinceText = true
     // JCLAW-170: a tool invocation completed on the backend. Append the
     // structured payload to the streaming assistant message's toolCalls
     // array so the collapsible block surfaces it live. The accordion starts

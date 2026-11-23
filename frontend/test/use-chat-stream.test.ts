@@ -1101,6 +1101,27 @@ describe('useChatStream', () => {
     expect(assistant.thinkingCollapsed).toBe(true)
   })
 
+  describe('text across tool rounds', () => {
+    const token = (content: string) => ({ type: 'token', content })
+    const call = (id: string) => ({ type: 'tool_call', id, name: 'exec', arguments: '{}', resultText: 'ok' })
+
+    it.each([
+      ['the text after a tool call starts a new paragraph', [token('Reused downstream.'), call('tc1'), token('Inputs '), token('validate cleanly.')], 'Reused downstream.\n\nInputs validate cleanly.'],
+      ['one break however many calls ran between', [token('Checked.'), call('tc1'), call('tc2'), token('Now Medium.'), call('tc3'), token('Medium verified.')], 'Checked.\n\nNow Medium.\n\nMedium verified.'],
+      ['nothing before the first text, when a call came first', [call('tc1'), token('Done.')], 'Done.'],
+      ['nothing within one round', [token('Hi '), token('back')], 'Hi back'],
+      ['nothing after text that already ends a paragraph', [token('One.\n\n'), call('tc1'), token('Two.')], 'One.\n\nTwo.'],
+      ['the missing newline after text ending one line', [token('One.\n'), call('tc1'), token('Two.')], 'One.\n\nTwo.'],
+      ['nothing before text that starts with whitespace', [token('One.'), call('tc1'), token(' Two.')], 'One. Two.'],
+    ])('%s', async (_case, frames, shown) => {
+      const deps = onConversation(42)
+      await mountStream(deps)
+      await turn(streamOn(42), 42, ...frames)
+
+      expect(deps.messages.value[0]!.content).toBe(shown)
+    })
+  })
+
   it('starts image-gen progress polling when a generate_image tool call fires', async () => {
     const deps = onConversation(42)
     await mountStream(deps)
