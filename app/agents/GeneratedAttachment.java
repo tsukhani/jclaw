@@ -6,7 +6,7 @@ import org.jspecify.annotations.Nullable;
  * An attachment a tool produced during a turn (JCLAW-228 images; JCLAW-562
  * audio clips), carried back through {@link ToolRegistry.ToolResult} so the
  * tool-call commit path can inline it on the assistant turn via
- * {@link AgentExecutionSink#appendAssistantMessage(String, String, java.util.List)} →
+ * {@link AgentExecutionSink#appendAssistantMessage(String, String, java.util.List, String)} →
  * {@code services.AttachmentService.persistGeneratedAttachment}. Kept
  * transport-agnostic (raw bytes, not a staged file or a data URL) so the tool
  * stays free of persistence concerns.
