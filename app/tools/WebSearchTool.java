@@ -197,7 +197,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
         return lastError != null ? lastError : SearchOutcome.error("Error: No search provider available.");
     }
 
-    private record ProviderEntry(SearchProvider provider, String apiKey) {}
+    private record ProviderEntry(SearchProvider provider, String apiKey, int priority) {}
 
     /** Return enabled providers with valid API keys, sorted by their configured priority. */
     private List<ProviderEntry> resolveProvidersByPriority() {
@@ -206,16 +206,11 @@ public class WebSearchTool implements ToolRegistry.Tool {
             if (!p.isEnabled()) continue;
             var key = ConfigService.get(p.apiKeyKey());
             if (key != null && !key.isBlank()) {
-                candidates.add(new ProviderEntry(p, key));
+                var priority = parseInt(ConfigService.get("search." + p.id() + ".priority", "99"), 99);
+                candidates.add(new ProviderEntry(p, key, priority));
             }
         }
-        // Pre-compute priorities to avoid ConfigService lookups inside the sort comparator
-        var priorities = new HashMap<String, Integer>();
-        for (var e : candidates) {
-            priorities.put(e.provider().id(),
-                    parseInt(ConfigService.get("search." + e.provider().id() + ".priority", "99"), 99));
-        }
-        candidates.sort(Comparator.comparingInt(e -> priorities.get(e.provider().id())));
+        candidates.sort(Comparator.comparingInt(ProviderEntry::priority));
         return candidates;
     }
 

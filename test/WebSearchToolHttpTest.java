@@ -462,6 +462,35 @@ class WebSearchToolHttpTest extends UnitTest {
                 "both providers must have been dialed (first failed, second won)");
     }
 
+    @Test
+    void aLowerPriorityNumberIsDialedFirstEvenWhenItsProviderIsListedLater() throws Exception {
+        // PROVIDERS lists Brave before Tavily, so only the priority sort can put Tavily first.
+        ConfigService.set("search.brave.enabled", "true");
+        ConfigService.set("search.brave.apiKey", "test-brave-key");
+        ConfigService.set("search.brave.baseUrl", server.url("/brave").toString());
+        ConfigService.set("search.brave.priority", "2");
+
+        ConfigService.set("search.tavily.enabled", "true");
+        ConfigService.set("search.tavily.apiKey", "test-tavily-key");
+        ConfigService.set("search.tavily.baseUrl", server.url("/tavily").toString());
+        ConfigService.set("search.tavily.priority", "1");
+
+        ConfigService.clearCache();
+
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"results":[{"title":"first by priority","url":"https://example.test/p",
+                          "content":"served by tavily"}]}""")
+                .build());
+
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertEquals(1, server.getRequestCount(), "the first provider tried answered, so no other is dialed");
+        assertEquals("/tavily", server.takeRequest().getUrl().encodedPath());
+        assertTrue(result.contains("via Tavily"), "attribution must name the provider that answered: " + result);
+    }
+
     // ==================== query template / interpolation ====================
 
     @Test
