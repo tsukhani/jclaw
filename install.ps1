@@ -38,7 +38,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-# ─── Configuration ───────────────────────────────────────────────────────────
+# --- Configuration -----------------------------------------------------------
 $Repo      = 'tsukhani/jclaw'
 $JclawHome = if ($env:JCLAW_HOME)    { $env:JCLAW_HOME }    else { Join-Path $env:USERPROFILE '.jclaw' }
 $Version   = if ($env:JCLAW_VERSION) { $env:JCLAW_VERSION } else { 'latest' }
@@ -62,7 +62,7 @@ $WinArch   = switch ($env:PROCESSOR_ARCHITECTURE) {
     default { switch ($env:PROCESSOR_ARCHITEW6432) { 'AMD64' { 'x64' } 'ARM64' { 'aarch64' } default { '' } } }
 }
 
-# ─── Output helpers ──────────────────────────────────────────────────────────
+# --- Output helpers ----------------------------------------------------------
 function Step    ($m) { Write-Host '==> ' -ForegroundColor Green -NoNewline; Write-Host $m }
 function Substep ($m) { Write-Host "    $m" -ForegroundColor Gray }
 function Warn    ($m) { Write-Host 'warning: ' -ForegroundColor Yellow -NoNewline; Write-Host $m }
@@ -82,7 +82,7 @@ function Banner {
     Write-Host ''
 }
 
-# ─── Java detection (context-aware) ──────────────────────────────────────────
+# --- Java detection (context-aware) ------------------------------------------
 # Runs an invoker that prints `java -version` (Windows java, or WSL's java) and
 # returns its combined output as plain text; '' when the command can't run.
 # java prints that banner on stderr, and 2>&1 turns each line into an ErrorRecord:
@@ -143,7 +143,7 @@ function Find-ZuluJre {
     $api = "${AzulApi}?java_version=$MinJava&os=windows&arch=$WinArch&archive_type=zip" +
            "&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20"
     try { $pkgs = Invoke-RestMethod -Uri $api } catch { $script:NoJreWhy = "couldn't reach the Azul JRE catalog: $($_.Exception.Message)"; return $null }
-    # Skip the JavaFX-bundled (fx) and CRaC variants — take the first plain JRE.
+    # Skip the JavaFX-bundled (fx) and CRaC variants - take the first plain JRE.
     $pkg = $pkgs | Where-Object { $_.name -notmatch '(?i)fx|crac' } | Select-Object -First 1
     if (-not $pkg -or -not $pkg.download_url) { $script:NoJreWhy = "no Zulu JRE $MinJava found for windows/$WinArch in the Azul catalog"; return $null }
     return $pkg
@@ -204,7 +204,7 @@ function Get-ZuluJre($pkg) {
     Substep "installed -> $(Split-Path $java.FullName)"
 }
 
-# ─── Launcher discovery ──────────────────────────────────────────────────────
+# --- Launcher discovery ------------------------------------------------------
 function Find-GitBash {
     $cands = @(
         (Join-Path $env:ProgramFiles 'Git\bin\bash.exe'),
@@ -255,7 +255,7 @@ function Resolve-Url {
     return "https://github.com/$Repo/releases/download/$tag/$Asset"
 }
 
-# ─── Main ────────────────────────────────────────────────────────────────────
+# --- Main --------------------------------------------------------------------
 Banner
 
 # Pick how we'll run JClaw, and therefore which Java to validate.
@@ -378,7 +378,7 @@ try {
 }
 Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 
-# ─── Launch ──────────────────────────────────────────────────────────────────
+# --- Launch ------------------------------------------------------------------
 function Start-ViaGitBash($bash, $appDir) {
     $u = $appDir -replace '\\','/'
     & $bash -lc "cd '$u' && ./jclaw.sh start"
@@ -409,7 +409,7 @@ if ($gitBash -or $useWsl) {
 }
 
 # Put `jclaw` on PATH for PowerShell and cmd.exe. jclaw.sh's write_shim drops the
-# jclaw.cmd there — the shim itself stays single-sourced in the bundle so
+# jclaw.cmd there - the shim itself stays single-sourced in the bundle so
 # `upgrade` refreshes it. This adds the one piece bash cannot: a persistent
 # Windows PATH entry, which only the registry (User scope) provides.
 #
@@ -417,7 +417,7 @@ if ($gitBash -or $useWsl) {
 # Returns whether $dir is on the User PATH *after* the attempt. Read back rather
 # than trusting the write: a managed machine can block the registry update by
 # policy without SetEnvironmentVariable throwing, and "we wrote it" is not "it is
-# there" — which is the difference between a working install and one that reports
+# there" - which is the difference between a working install and one that reports
 # success and then cannot find jclaw.
 function Add-ToUserPath($dir) {
     $parts = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -ne '' })
@@ -443,7 +443,7 @@ function ConvertTo-PosixPath($p) {
 }
 
 # Write the shim, then put its directory on PATH. Both are needed and neither is
-# sufficient: install.sh runs `jclaw.sh shim` (line ~545) and this must too —
+# sufficient: install.sh runs `jclaw.sh shim` (line ~545) and this must too -
 # write_shim's only caller is that subcommand, so without it the PATH entry points
 # at an empty directory (JCLAW-1105 follow-up).
 $BinDir      = Join-Path $env:USERPROFILE '.local\bin'
@@ -475,7 +475,7 @@ if ($gitBash -or $useWsl) {
         $pathOk        = Add-ToUserPath $BinDir
         $pathChanged   = ($pathOk -and -not $alreadyOnPath)
         if ($pathOk)   { Substep $(if ($pathChanged) { "added $BinDir to your PATH" } else { "$BinDir already on your PATH" }) }
-        else           { Warn "$BinDir is not on your PATH — the jclaw command will not resolve." }
+        else           { Warn "$BinDir is not on your PATH - the jclaw command will not resolve." }
     } catch { Warn "PATH setup skipped: $($_.Exception.Message)" }
 }
 
@@ -490,7 +490,7 @@ if (-not $NoStart -and ($gitBash -or $useWsl)) {
     }
 }
 
-# ─── Summary ─────────────────────────────────────────────────────────────────
+# --- Summary -----------------------------------------------------------------
 Write-Host ''
 Write-Host 'JClaw is installed.' -ForegroundColor Green
 Write-Host ''
