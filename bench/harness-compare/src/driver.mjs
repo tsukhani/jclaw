@@ -2,12 +2,15 @@
 // Run k of a task goes through every harness before run k+1, and the harness order rotates each run, so the
 // provider's drift over the window falls evenly on all three.
 // Usage: node driver.mjs [--runs 10] [--tasks a,b] [--harnesses jclaw,openclaw,hermes] [--out file]
+//                        [--pids jclaw=PID,openclaw=PID,hermes=PID]
+// With --pids it also samples each harness's memory once after the warm-up, before every turn and at the end.
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { config, HARNESSES, statusUrl, now } from './config.mjs'
 import { TASKS, groundTruth } from './tasks.mjs'
 import { ADAPTERS } from './adapters.mjs'
+import { parseRoots, snapshot } from './memory.mjs'
 
 const { values: opt } = parseArgs({
   options: {
@@ -15,13 +18,27 @@ const { values: opt } = parseArgs({
     tasks: { type: 'string' },
     harnesses: { type: 'string', default: HARNESSES.join(',') },
     out: { type: 'string', default: path.join(config.runDir, 'turns.jsonl') },
+    pids: { type: 'string' },
   },
 })
 const harnesses = opt.harnesses.split(',')
 const tasks = opt.tasks ? TASKS.filter(t => opt.tasks.split(',').includes(t.id)) : TASKS
 const runs = Number(opt.runs)
+const roots = parseRoots(opt.pids)
 const sink = fs.createWriteStream(opt.out, { flags: 'a' })
 const write = (row) => sink.write(JSON.stringify(row) + '\n')
+
+// Called only once the proxy is quiet and before the next turn's clock starts: reading a process's memory map holds
+// its map lock for a moment, which must never land inside a timed turn.
+async function sampleMemory(phase) {
+  if (!Object.keys(roots).length) return
+  const trees = snapshot(roots)
+  const runtime = {}
+  for (const h of harnesses) {
+    if (ADAPTERS[h].runtimeMemory) runtime[h] = await ADAPTERS[h].runtimeMemory().catch(e => ({ error: String(e?.message ?? e) }))
+  }
+  write({ kind: 'memory', phase, at: Date.now(), trees, runtime })
+}
 
 // Waits until no harness has a request in flight and none has had one for quietMs, so one harness's background
 // calls (a title, a memory capture) never land inside another turn.
@@ -51,6 +68,8 @@ for (const h of harnesses) {
   write({ kind: 'warmup', harness: h, ...r })
   console.log(`[warmup] ${h}: ${r.error ? 'ERROR ' + r.error : Math.round(r.tLast - r.tSend) + ' ms'}`)
 }
+await quiesce()
+await sampleMemory('start')
 
 for (let run = 1; run <= runs; run++) {
   for (const task of tasks) {
@@ -60,6 +79,7 @@ for (let run = 1; run <= runs; run++) {
       for (let i = 0; i < task.turns.length; i++) {
         const turn = task.turns[i]
         const waited = await quiesce()
+        await sampleMemory('run')
         let r
         try {
           conv ??= await ADAPTERS[h].newConversation(`${task.id}-${run}`)
@@ -77,5 +97,6 @@ for (let run = 1; run <= runs; run++) {
   }
 }
 await quiesce()
+await sampleMemory('end')
 write({ kind: 'end', at: new Date().toISOString() })
 await new Promise(r => sink.end(r))

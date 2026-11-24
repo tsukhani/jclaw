@@ -37,6 +37,26 @@ export function compare(prev, cur) {
   return changes
 }
 
+// Memory has no spread across runs to step out of, so a move of MARKED_SHARE alone marks it.
+export function compareMemory(prev, cur) {
+  const changes = []
+  for (const h of HARNESSES) {
+    const a = prev?.[h]
+    const b = cur?.[h]
+    if (!a || !b || a.measure !== b.measure) continue
+    for (const k of ['median', 'peak']) {
+      const was = a[`${k}Kb`]
+      const now = b[`${k}Kb`]
+      if (!was || now == null) continue
+      const share = (now - was) / was
+      if (Math.abs(share) >= MARKED_SHARE) changes.push({ harness: h, metric: k, was, now, share })
+    }
+  }
+  return changes
+}
+
+const mib = kb => (kb == null ? '–' : Math.round(kb / 1024).toLocaleString('en-US'))
+
 function e2eNote(S, task) {
   const j = S[`${task}|jclaw`]
   return ['openclaw', 'hermes'].filter(h => S[`${task}|${h}`]).map(h => {
@@ -48,7 +68,7 @@ function e2eNote(S, task) {
 }
 
 export function render({ analysis, conformance, versions, turns, history, host }) {
-  const { meta, rows, summary: S, background } = analysis
+  const { meta, rows, summary: S, background, memory } = analysis
   const model = meta.model ?? config.model
   const out = []
   const p = (s = '') => out.push(s)
@@ -63,6 +83,7 @@ export function render({ analysis, conformance, versions, turns, history, host }
   p('|---|---|---|')
   for (const h of HARNESSES) p(`| ${N[h]} | ${versions[h]?.tag ?? '?'} | ${versions[h]?.commit ? `\`${versions[h].commit.slice(0, 12)}\`` : '–'} |`)
   if (versions.hermesPlugin) p(`| Hermes search plugin | web-ollama-cloud | \`${versions.hermesPlugin.slice(0, 12)}\` |`)
+  if (versions.node) p(`| Node.js, for the proxy, the driver and OpenClaw | v${versions.node} | – |`)
   p()
 
   p('## Conformance')
@@ -109,10 +130,18 @@ export function render({ analysis, conformance, versions, turns, history, host }
       const marked = compare(base.summary, S)
       p(`**Against ${label}** (${base.at.slice(0, 16).replace('T', ' ')} UTC): ${vs.length ? `versions changed: ${vs.join(', ')}` : 'no version changed'}.`)
       p()
-      if (!marked.length) { p(`No marked change: no median own or end-to-end time moved by ${MARKED_SHARE * 100}% or more and out of that run's 25th–75th percentile range.`); p(); continue }
-      p('| Task | Harness | Measure | Then, median | Now, median | Change |')
-      p('|---|---|---|---|---|---|')
-      for (const c of marked) { const [t, h] = c.key.split('|'); p(`| ${t} | ${N[h]} | ${c.metric === 'own' ? 'own time' : 'end to end'} | ${f(c.was)} ms | ${f(c.now)} ms | ${c.share > 0 ? '+' : ''}${Math.round(c.share * 100)}% |`) }
+      if (!marked.length) {
+        p(`No marked change in time: no median own or end-to-end time moved by ${MARKED_SHARE * 100}% or more and out of that run's 25th–75th percentile range.`)
+      } else {
+        p('| Task | Harness | Measure | Then, median | Now, median | Change |')
+        p('|---|---|---|---|---|---|')
+        for (const c of marked) { const [t, h] = c.key.split('|'); p(`| ${t} | ${N[h]} | ${c.metric === 'own' ? 'own time' : 'end to end'} | ${f(c.was)} ms | ${f(c.now)} ms | ${c.share > 0 ? '+' : ''}${Math.round(c.share * 100)}% |`) }
+      }
+      p()
+      if (!base.memory || !memory) continue
+      const memMarked = compareMemory(base.memory, memory)
+      if (!memMarked.length) { p(`No marked change in memory: no harness's median or peak moved by ${MARKED_SHARE * 100}% or more.`); p(); continue }
+      for (const c of memMarked) p(`- ${N[c.harness]}'s ${c.metric === 'median' ? 'median' : 'peak'} memory: ${mib(c.was)} → ${mib(c.now)} MiB (${c.share > 0 ? '+' : ''}${Math.round(c.share * 100)}%)`)
       p()
     }
   }
@@ -171,6 +200,33 @@ export function render({ analysis, conformance, versions, turns, history, host }
     p(`| ${N[h]} | ${rs.length} | ${rs.filter(r => r.correct).length} | ${f(med(rs.map(r => r.own)))} | ${f(med(rs.map(r => r.before)))} / ${f(med(rs.map(r => r.between)))} / ${f(med(rs.map(r => r.after)))} | ${f(med(rs.map(r => r.e2e)))} | ${rs.reduce((s, r) => s + r.auxCalls, 0)} | ${bg.length} (${f(bg.reduce((s, b) => s + b.ms, 0) / 1000)} s at the provider) | ${injected ? `${injected} given reasoning_effort` : '–'} |`)
   }
   p()
+  p('## Memory')
+  p()
+  if (!memory) p('Not measured in this run.')
+  else {
+    const measured = HARNESSES.filter(h => memory[h])
+    const rssOnly = measured.filter(h => memory[h].measure === 'rss').map(h => N[h])
+    const PSS = 'PSS (proportional set size: memory shared between processes is split among them)'
+    const unit = !rssOnly.length ? PSS
+      : rssOnly.length === measured.length ? 'RSS (resident set size: memory shared between processes counts in each of them; PSS cannot be read here)'
+        : `${PSS}, and in RSS for ${rssOnly.join(' and ')}, whose PSS could not be read`
+    p(`Each harness's whole process tree, so JClaw's sidecars count with its JVM, sampled when no request was in flight: after the warm-up, before every turn and at the end. In MiB of ${unit}.`)
+    p()
+    p('| Harness | After the warm-up | Before each turn, median | Peak | At the end | Processes at the peak |')
+    p('|---|---|---|---|---|---|')
+    for (const h of HARNESSES) {
+      const m = memory[h]
+      if (!m) { p(`| ${N[h]} | not measured | | | | |`); continue }
+      p(`| ${N[h]} | ${mib(m.startKb)} | ${mib(m.medianKb)} | ${mib(m.peakKb)} | ${mib(m.endKb)} | ${m.atPeak.map(x => `${x.name}${x.count > 1 ? ` ×${x.count}` : ''} (${mib(x.kb)})`).join(', ')} |`)
+    }
+    for (const h of HARNESSES) {
+      const r = memory[h]?.runtime
+      if (r?.kind !== 'jvm') continue
+      p()
+      p(`${N[h]}'s JVM, as it reports itself before each turn: ${mib(r.heapUsedMedianKb)} MiB of heap in use at the median and ${mib(r.heapUsedPeakKb)} at the most, in a heap of ${mib(r.heapCommittedMedianKb)} MiB committed at the median and ${mib(r.heapCommittedPeakKb)} at the most, which may grow to ${mib(r.heapMaxKb)}. Outside the heap, ${mib(r.nonHeapCommittedMedianKb)} MiB is committed for classes and compiled code. The process memory in the table counts the heap pages the JVM holds, whether or not they are in use.${r.failed ? ` ${r.failed} of ${r.samples + r.failed} reads failed.` : ''}`)
+    }
+  }
+  p()
   const wrong = turns.filter(l => l.kind === 'turn' && l.timed && !l.correct)
   p('## Wrong or failed answers')
   p()
@@ -195,7 +251,8 @@ if (isMain(import.meta.url)) {
   if (conformance.pass && values.history) {
     const keep = ['ownP50', 'ownP25', 'ownP75', 'e2eP50', 'e2eP25', 'e2eP75', 'correct', 'of']
     const summary = Object.fromEntries(Object.entries(analysis.summary).map(([k, v]) => [k, Object.fromEntries(keep.map(x => [x, v[x]]))]))
-    fs.appendFileSync(values.history, JSON.stringify({ at: analysis.meta.at, host, model: analysis.meta.model ?? config.model, runDir: dir, versions, summary }) + '\n')
+    const memory = analysis.memory && Object.fromEntries(Object.entries(analysis.memory).map(([h, m]) => [h, m && { measure: m.measure, startKb: m.startKb, medianKb: m.medianKb, peakKb: m.peakKb, endKb: m.endKb }]))
+    fs.appendFileSync(values.history, JSON.stringify({ at: analysis.meta.at, host, model: analysis.meta.model ?? config.model, runDir: dir, versions, summary, memory }) + '\n')
   }
   console.log(`report: ${path.join(dir, 'report.md')}${conformance.pass ? '' : ' (conformance failed: no verdict, not added to the history)'}`)
 }

@@ -125,7 +125,49 @@ export function analyze(lines, proxy) {
       }
     }
   }
-  return { meta, rows, summary, background }
+  return { meta, rows, summary, background, memory: summarizeMemory(lines, meta.harnesses) }
+}
+
+/**
+ * Per harness: memory after the warm-up, the median and the peak over the samples taken before each turn, memory at
+ * the end, and the processes at the peak, in PSS where every sample had it and RSS otherwise. Null for a harness whose
+ * tree was never seen running, and for a run with no samples at all.
+ */
+export function summarizeMemory(lines, harnesses) {
+  const samples = lines.filter(l => l.kind === 'memory')
+  if (!samples.length) return null
+  const out = {}
+  for (const h of harnesses) {
+    const seen = samples.map(s => ({ phase: s.phase, t: s.trees?.[h] })).filter(x => x.t?.processes > 0)
+    if (!seen.length) { out[h] = null; continue }
+    const measure = seen.every(x => x.t.pssKb != null) ? 'pss' : 'rss'
+    const kb = x => x.t[`${measure}Kb`]
+    const run = seen.filter(x => x.phase === 'run')
+    const peak = (run.length ? run : seen).reduce((a, b) => (kb(b) > kb(a) ? b : a))
+    const start = seen.find(x => x.phase === 'start')
+    const end = seen.findLast(x => x.phase === 'end')
+    out[h] = {
+      measure, samples: seen.length,
+      startKb: start ? kb(start) : null, medianKb: quantile(run.map(kb), 0.5), peakKb: kb(peak), endKb: end ? kb(end) : null,
+      atPeak: Object.entries(peak.t.byName).map(([name, e]) => ({ name, count: e.count, kb: e[`${measure}Kb`] })).sort((a, b) => b.kb - a.kb),
+      runtime: summarizeRuntime(samples.filter(s => s.phase === 'run').map(s => s.runtime?.[h])),
+    }
+  }
+  return out
+}
+
+// What the harness itself reports about its memory, so far only JClaw's JVM heap; null when it reported nothing.
+function summarizeRuntime(reports) {
+  const ok = reports.filter(r => r && !r.error)
+  if (!ok.length) return null
+  const of = k => ok.map(r => r[k]).filter(v => v != null)
+  const max = k => (of(k).length ? Math.max(...of(k)) : null)
+  return {
+    kind: ok[0].kind, samples: ok.length, failed: reports.length - ok.length,
+    heapUsedMedianKb: quantile(of('heapUsedKb'), 0.5), heapUsedPeakKb: max('heapUsedKb'),
+    heapCommittedMedianKb: quantile(of('heapCommittedKb'), 0.5), heapCommittedPeakKb: max('heapCommittedKb'),
+    heapMaxKb: max('heapMaxKb'), nonHeapCommittedMedianKb: quantile(of('nonHeapCommittedKb'), 0.5),
+  }
 }
 
 export function loadRun(runDir) {

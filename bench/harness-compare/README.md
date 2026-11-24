@@ -25,6 +25,8 @@ The eight tasks, each run 10 times by default:
 - one web search;
 - three independent web searches.
 
+**Memory** is reported beside the times but never judged. The driver samples each harness's whole process tree: JClaw's JVM with the sidecars it starts, and everything under the process the run started for OpenClaw and for Hermes. It samples once after the warm-up turns, before every turn and once at the end, always when no request is in flight. Reading a process's memory map holds its lock for a moment, so a sample never lands inside a timed turn. A peak that rises and falls within one turn is therefore not seen. On Linux it reads PSS, which splits memory shared between processes among them, so a library two processes share counts once in the tree. Elsewhere only RSS is available. Each harness is measured as installed: JClaw's JVM starts with a 128 MB heap that can grow to 2 GB.
+
 Every answer is graded mechanically. The web answers are checked against kernel.org's, python.org's and nodejs.org's own release feeds, read when the run starts. Run *k* of a task goes through all three harnesses before run *k*+1, and the order rotates each run. The driver waits until no request has been in flight for 3 s before each turn, so one harness's background calls never land in another's turn.
 
 ## Like for like, checked on every run
@@ -59,7 +61,7 @@ The benchmark runs third-party code (OpenClaw, Hermes, the community plugin and 
 curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/bench/harness-compare/setup-host.sh | bash
 ```
 
-This creates the `harnessbench` user, installs pnpm for it, and makes a sparse checkout of this folder in `~harnessbench/jclaw`. Also needed on the host: Node.js 24.16 or newer, `git`, `curl`, `unzip` and `openssl`. JClaw's installer brings its own Java, and Hermes's setup its own Python.
+This creates the `harnessbench` user and installs for it alone Node.js 26, the version JClaw's CI uses, and pnpm. Node.js comes from nodejs.org, checked against its published checksums, into `~harnessbench/.local/node`. The system's own Node.js stays as it is for the host's other services. The script then makes a sparse checkout of this folder in `~harnessbench/jclaw`. Run it again to move to the newest Node.js 26 release. Also needed on the host: `git`, `curl`, `unzip`, `xz` and `openssl`. JClaw's installer brings its own Java, and Hermes's setup its own Python.
 
 ### The key
 
@@ -77,7 +79,7 @@ The run passes the key to each harness in its environment and to JClaw through i
 ssh tsukhani@abundent.com sudo -iu harnessbench jclaw/bench/harness-compare/run.sh
 ```
 
-A full run took 31 minutes on the abundent server (2026-11-24): about a minute to install JClaw and start the three harnesses, and 30 for the 390 turns. The first run on a host, and the first after a new OpenClaw or Hermes release, adds about 10 minutes: OpenClaw's build (4 minutes; a commit already built is reused) and Hermes's runtime (kept in `work/hermes-runtime`). A run stops everything it started and deletes its installs, keeping the results. Useful options (`run.sh --help` lists them all):
+A full run took 31 minutes on the abundent server (2026-11-24): about a minute to install JClaw and start the three harnesses, and 30 for the 390 turns. The first run on a host, and the first after a new OpenClaw or Hermes release, adds about 10 minutes: OpenClaw's build (4 minutes; a commit already built on the same Node.js is reused) and Hermes's runtime (kept in `work/hermes-runtime`). A new Node.js rebuilds OpenClaw from empty `node_modules`. A run stops everything it started and deletes its installs, keeping the results. Useful options (`run.sh --help` lists them all):
 
 - `--smoke`: one run of the question and one-search tasks, to check the setup (2 minutes once the builds are reused); it is not added to the history.
 - `--openclaw main`, `--hermes v0.23.3`, `--jclaw v1.0.30`: a version other than the latest release.
@@ -97,13 +99,13 @@ Each run writes `~harnessbench/harness-bench/runs/<UTC time>/`:
 
 | File | What it holds |
 |---|---|
-| `report.md` | the versions, the conformance table, the verdict, changes since earlier runs, and a table per task |
-| `turns.jsonl` | one line per turn: the driver's timestamps, the answer and its grade, and the ground truth |
+| `report.md` | the versions, the conformance table, the verdict, changes since earlier runs, a table per task, and each harness's memory |
+| `turns.jsonl` | one line per turn: the driver's timestamps, the answer and its grade, and the ground truth; and one per memory sample, each harness's tree added up by process name |
 | `proxy/proxy-*.jsonl` | one line per request through the proxy |
 | `analysis.json`, `conformance.json`, `versions.json` | the split of each turn, the checks, the exact versions |
 | `logs/` | each step's output, the build and the harnesses' own logs |
 
-The verdict follows JF-399: JClaw is comparable on a task when its median own time per turn is no more than 1.10 of the faster of the other two (`BENCH_BAR` changes the bar). The comparison with earlier runs uses `~/harness-bench/history.jsonl`, which holds runs that passed conformance on the same host with the same model. A median own or end-to-end time that moved by 20% or more, and out of the earlier run's 25th–75th percentile range, is reported as a marked change, beside the versions that changed in between.
+The verdict follows JF-399: JClaw is comparable on a task when its median own time per turn is no more than 1.10 of the faster of the other two (`BENCH_BAR` changes the bar). The comparison with earlier runs uses `~/harness-bench/history.jsonl`, which holds runs that passed conformance on the same host with the same model. A median own or end-to-end time that moved by 20% or more, and out of the earlier run's 25th–75th percentile range, is reported as a marked change, beside the versions that changed in between. So is a harness's median or peak memory that moved by 20% or more. Memory has no spread across runs to step out of, so the 20% alone decides.
 
 ## Settings
 
@@ -114,7 +116,8 @@ The verdict follows JF-399: JClaw is comparable on a task when its median own ti
 | `PORT_BASE` | `18100` | the proxy's status port; the three harness ports follow it |
 | `JCLAW_PORT`, `OPENCLAW_PORT`, `HERMES_PORT` | `19100`, `18789`, `8642` | each harness's own port; JClaw's AOT training also uses `JCLAW_PORT` + 1000 |
 | `BENCH_BAR` | `1.10` | the comparable bar |
+| `BENCH_NODE_DIR` | `~/.local/node` | the Node.js the run puts first on its PATH; it must be version 26 or newer |
 
 ## Tests
 
-`node --test test/` runs the proxy's self-test (which `run.sh` also runs before every benchmark) and the tests of the analysis, the conformance checks and the change detection on recorded runs.
+`node --test`, run in this folder, runs the proxy's self-test (which `run.sh` also runs before every benchmark) and the tests of the analysis, the conformance checks and the change detection on recorded runs. It also tests the memory sampler on known `/proc` text and on the test's own process tree.

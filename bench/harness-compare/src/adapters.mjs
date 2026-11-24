@@ -56,6 +56,13 @@ const jclaw = {
     }
   },
   async newConversation() { return { id: null } },
+  // A JVM's process memory is mostly the heap it has committed, which can stay well above the heap in use, so that is
+  // read beside it.
+  async runtimeMemory() {
+    const s = await this.api('/api/metrics/jvm')
+    const kb = b => (b >= 0 ? Math.round(b / 1024) : null)
+    return { kind: 'jvm', heapUsedKb: kb(s.heapUsed), heapCommittedKb: kb(s.heapCommitted), heapMaxKb: kb(s.heapMax), nonHeapCommittedKb: kb(s.nonHeapCommitted) }
+  },
   async send(conv, message) {
     const tSend = now()
     const res = await this.api('/api/chat/stream', {

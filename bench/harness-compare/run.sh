@@ -53,9 +53,12 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 # pnpm's installer adds itself to PATH in ~/.bashrc, which a non-interactive `sudo -iu` login shell never reads.
 PNPM_HOME=${PNPM_HOME:-$HOME/.local/share/pnpm}
 for d in "$PNPM_HOME" "$PNPM_HOME/bin"; do [ -d "$d" ] && PATH=$d:$PATH; done
+# setup-host.sh's Node.js, ahead of the system's, so the proxy, the driver and OpenClaw all run on it.
+BENCH_NODE_DIR=${BENCH_NODE_DIR:-$HOME/.local/node}
+[ -x "$BENCH_NODE_DIR/bin/node" ] && PATH=$BENCH_NODE_DIR/bin:$PATH
 for tool in node pnpm git curl unzip openssl; do command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed (README.md, Host setup)"; done
-node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 24 || (a === 24 && b >= 16) ? 0 : 1)' \
-    || die "Node.js 24.16 or newer is needed; this is $(node --version)"
+node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 26 ? 0 : 1)' \
+    || die "Node.js 26 or newer is needed; this is $(node --version) from $(command -v node) (setup-host.sh installs it in ~/.local/node)"
 [ -f "$KEY_FILE" ] || die "no key file at $KEY_FILE (README.md, The key)"
 node -e 'process.exit(require("fs").statSync(process.argv[1]).mode & 0o077 ? 1 : 0)' "$KEY_FILE" \
     || die "$KEY_FILE is readable by others: chmod 600 it"
@@ -175,15 +178,20 @@ node "$LIB/prepare.mjs" wait "http://127.0.0.1:$JCLAW_PORT/api/status" 300 || di
 log "Building OpenClaw $OPENCLAW_REF"
 OPENCLAW_DIR=$BENCH_HOME/work/openclaw
 OPENCLAW_COMMIT=$(checkout "$OPENCLAW_DIR" https://github.com/openclaw/openclaw.git "$OPENCLAW_REF")
-# The build takes about 4 minutes; a commit already built by an earlier run is reused.
+# The build takes about 4 minutes; one an earlier run made of the same commit on the same Node.js is reused. A new
+# Node.js starts from empty node_modules, since a native module built for the old one may not load on it.
 BUILT_STAMP=$OPENCLAW_DIR/.bench-built
-if [ "$(cat "$BUILT_STAMP" 2>/dev/null)" = "$OPENCLAW_COMMIT" ]; then
+BUILD_KEY="$OPENCLAW_COMMIT node $(node --version)"
+if [ "$(cat "$BUILT_STAMP" 2>/dev/null)" = "$BUILD_KEY" ]; then
     log "OpenClaw $OPENCLAW_REF was built by an earlier run"
 else
+    if [ "$(sed -n 's/^[0-9a-f]* node //p' "$BUILT_STAMP" 2>/dev/null)" != "$(node --version)" ]; then
+        find "$OPENCLAW_DIR" -name node_modules -type d -prune -exec rm -rf {} +
+    fi
     rm -f "$BUILT_STAMP"
     ( cd "$OPENCLAW_DIR" && pnpm install --frozen-lockfile && pnpm build ) >"$RUN_DIR/logs/openclaw-build.log" 2>&1 \
         || die "OpenClaw did not build: $RUN_DIR/logs/openclaw-build.log"
-    echo "$OPENCLAW_COMMIT" >"$BUILT_STAMP"
+    echo "$BUILD_KEY" >"$BUILT_STAMP"
 fi
 OPENCLAW_STATE=$RUN_DIR/openclaw-state
 node "$LIB/prepare.mjs" render "$HERE/harness/openclaw.json5" "$OPENCLAW_STATE/openclaw.json"
@@ -242,7 +250,11 @@ fetch(`http://127.0.0.1:${port}/api/status`).then(r => r.json()).then(s => {
 EOF
 
 # ─── The run ────────────────────────────────────────────────────────────────
-driver_args=(--runs "$RUNS")
+# Each harness's memory is its process tree from these roots: JClaw's JVM, which starts its sidecars, and the
+# process start_bg ran for each of the others.
+memory_roots="jclaw=$(cat "$RUN_DIR/jclaw-home/jclaw/server.pid" 2>/dev/null || true)"
+memory_roots+=",openclaw=$(cat "$RUN_DIR/pids/openclaw"),hermes=$(cat "$RUN_DIR/pids/hermes")"
+driver_args=(--runs "$RUNS" --pids "$memory_roots")
 [ -n "$TASKS" ] && driver_args+=(--tasks "$TASKS")
 log "Running: $RUNS runs${TASKS:+ of $TASKS} (progress in $RUN_DIR/logs/driver.log)"
 node "$LIB/driver.mjs" "${driver_args[@]}" >"$RUN_DIR/logs/driver.log" 2>&1 || die "the driver failed: $RUN_DIR/logs/driver.log"
