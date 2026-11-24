@@ -19,25 +19,17 @@ certain to release it: a fork parked on a latch, a lock or a socket read never r
 and nothing can cut the closer's wait short.
 
 The JDK's own `java.util.concurrent.StructuredTaskScope` is deliberately **not** used. JCLAW-1155
-spiked it and the answer was no, for a reason specific to this repo's two-compiler build:
+spiked it and the answer was no:
 
-- `StructuredTaskScope` is still a preview API in JDK 25 (JEP 505), so `javac` refuses it without
-  `--enable-preview` and, once given the flag, marks the calling classfile preview (minor version
-  65535) — a marking the JVM then enforces at load time.
-- `playRun`, `playStart` and `playAutotest` all `dependsOn("compileJava")`, so every `app/` class
-  passes through Gradle's `javac` before Play starts. Neither the play1 Gradle plugin nor
-  `conf/application.conf` passes `--enable-preview` to the app JVM.
-- The play1 fork's dev-mode compiler is ECJ, configured by `ApplicationCompiler`'s fixed settings
-  map. That map has no preview option and no config knob — `java.source` only selects
-  source/target/compliance. ECJ 3.46 refuses `--enable-preview` at source 25 outright
-  ("Preview of features is supported only at the latest source level"), and compiles preview API
-  use to an **unmarked** classfile on a warning.
-
-So the same source yields differently-marked bytecode from the two compilers, and the runtime
-guard that `--enable-preview` exists to provide is enforced on one path and silently absent on the
-other. `utils.TaskScope` avoids the split entirely.
+- It interrupts its forks when the scope is canceled or closes, and an interrupt kills the H2 file
+  a fork may be writing.
+- It is still a preview API in JDK 25 (JEP 505). Since 1.13.113 the play1 fork's one switch for
+  preview features is `java.enablePreview=true` in `conf/application.conf`: Gradle's
+  `compileJava` and `compileTestJava`, Play's own javac and every Play JVM then all take
+  `--enable-preview`, and javac compiles preview features only at the running JDK's own release,
+  so the whole application would be tied to one JDK. JClaw does not set it.
 
 **Revisit when structured concurrency leaves preview.** At that point `StructuredTaskScope` needs
-no flag from either compiler, but it still interrupts its unfinished subtasks when the scope is
+no flag, but it still interrupts its unfinished subtasks when the scope is
 canceled (under the default joiner, on the first failure) and when it closes. It can replace
 `TaskScope` only at a call site whose forks never touch H2 or JPA; `TaskScope` stays for the rest.

@@ -9,8 +9,9 @@ any dereference, return, assignment or argument that contradicts that.
 the test suite and which Sonar already depends on. The `play` CLI is a Gradle wrapper whose
 `playRun` and `playAutotest` tasks depend on `compileJava`, so a violation fails `play run` and
 `play autotest` as well — before Play's own compile starts. What the checker cannot see is that
-second compile: Play 1.x recompiles `app/` with ECJ inside the fork for dev-mode reload and for
-the test runner, and a javac plugin cannot load there. That split is structural, not a gap to
+second compile: Play 1.x recompiles `app/` with the JDK's javac inside the fork for dev-mode
+reload and for the test runner, with `-proc:none` and an empty processor path, so no javac plugin
+loads there. That split is structural, not a gap to
 close — the Gradle compile is the single place a javac plugin can see this codebase, the same
 layering Spotless uses.
 

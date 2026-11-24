@@ -10,9 +10,10 @@ plugins {
     id("net.ltgt.errorprone") version "5.2.0"
 }
 
-// JCLAW-1149: nullness enforcement. Play's own ECJ compile inside the fork cannot host a
-// javac plugin, so the checker rides the Gradle compileJava — which Sonar, pre-push and, via
-// the play CLI's task graph, `play run`/`play autotest` all pass through first.
+// JCLAW-1149: nullness enforcement. Play's own javac compile inside the fork loads no javac
+// plugin (-proc:none, an empty processor path), so the checker rides the Gradle compileJava —
+// which Sonar, pre-push and, via the play CLI's task graph, `play run`/`play autotest` all pass
+// through first.
 tasks.withType<JavaCompile>().configureEach {
     options.errorprone {
         // compileTestJava stays out of this block: test/ is 500+ default-package classes with

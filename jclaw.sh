@@ -4216,7 +4216,8 @@ do_start_prod() {
     # passes. If precompiled/ is missing, the framework logs 'Precompiled
     # classes are missing!!' and refuses to start." A dist install ships
     # precompiled/; a developer clone refreshed it above when stale. Without
-    # it, every boot re-ran ECJ and Groovy inside the server: measured over
+    # it, every boot re-ran the Java compile (ECJ when this was measured) and
+    # Groovy inside the server: measured over
     # five boots, 7.97 s to listening versus 3.56 s, and 35 MB more live heap
     # left behind by the compilers. We keep --%prod alongside as
     # defense-in-depth in case a future Play release decouples the
@@ -6002,7 +6003,7 @@ do_check() {
     CHECK_FAILED=0
     check_step wildcards check_wildcard_imports
     check_step spotless ./gradlew --quiet spotlessCheck
-    # JCLAW-1149: Play's ECJ compile cannot host a javac plugin, so the Gradle compileJava is the only place NullAway runs.
+    # JCLAW-1149: Play's own javac compile loads no javac plugin (-proc:none), so the Gradle compileJava is the only place NullAway runs.
     check_step compile ./gradlew --quiet compileJava
     check_step ruff check_ruff
     check_step shellcheck check_shellcheck

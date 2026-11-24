@@ -3,8 +3,9 @@
 Traces and metrics leave the process over OTLP from `app/services/telemetry/` (JCLAW-34), and
 nothing leaves until an operator turns it on. `OtelRuntime.init()` builds the SDK once, from
 `jobs.TelemetryBootstrapJob` rather than a plugin start hook: it reads the Config DB, and a
-`conf/play.plugins` entry is ECJ-compiled before the app, so the plugin may reach nothing in
-`app/` beyond its own package (`TelemetryState` is the three volatile fields it reads). Only three
+`conf/play.plugins` entry is compiled on its own when Play loads it, before the app, so the
+plugin may reach nothing in `app/` beyond its own package (`TelemetryState` is the three volatile
+fields it reads). Only three
 leaves ever change — `DelegatingSampler`, `DelegatingSpanExporter`, `DelegatingMetricExporter` —
 and `applyConfig()` swaps them from `ConfigService.setWithSideEffects` on every `otel.*` write,
 force-flushing the meter and tracer providers to the exporter being replaced first (bounded at

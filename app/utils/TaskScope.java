@@ -27,14 +27,12 @@ import java.util.concurrent.TimeUnit;
  * interrupted, so every wait inside a fork must end on its own, through its own timeout
  * or something certain to release it.
  *
- * <p>Stands in for {@code java.util.concurrent.StructuredTaskScope}, which is a preview
- * API in JDK 25 (JEP 505) and unusable here: the play1 fork's ECJ compiler has no
- * {@code --enable-preview} path at {@code java.source=25}, so it emits an unmarked
- * classfile where Gradle's javac emits a preview-marked one that the app JVM then
- * refuses to load. Revisit when structured concurrency leaves preview, knowing that
- * {@code StructuredTaskScope} interrupts its unfinished subtasks when it is canceled
- * (under the default joiner, on the first failure) and when it closes, so it suits only
- * forks that never touch H2. See JCLAW-1155 for the spike output.
+ * <p>Stands in for {@code java.util.concurrent.StructuredTaskScope}, which interrupts its
+ * unfinished subtasks when it is canceled (under the default joiner, on the first failure)
+ * and when it closes, so it suits only forks that never touch H2. It is also a preview API
+ * in JDK 25 (JEP 505), usable only with {@code java.enablePreview=true}, which compiles and
+ * runs the whole application with {@code --enable-preview} at the running JDK's own
+ * release. See JCLAW-1155 for the spike output.
  *
  * <p>Homogeneous by design: every task returns {@code T}. Forking tasks of differing
  * types is the one shape this does not cover — use plain futures there.
