@@ -8,7 +8,10 @@ import Subagents from '~/pages/subagents.vue'
 // useRoute() per test to drive the filter. Default to no filter; individual
 // tests override via routeQuery.value.
 const routeQuery = { value: {} as Record<string, string> }
-mockNuxtImport('useRoute', () => () => ({ query: routeQuery.value }))
+// A whole route, not just its query: <NuxtLink> iterates the current route's `matched`.
+mockNuxtImport('useRoute', () => () => ({
+  query: routeQuery.value, path: '/subagents', params: {}, fullPath: '/subagents', hash: '', name: 'subagents', meta: {}, matched: [],
+}))
 
 /**
  * JCLAW-271 frontend coverage for the SubagentRuns admin page:

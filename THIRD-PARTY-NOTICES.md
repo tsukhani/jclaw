@@ -361,7 +361,7 @@ bundle ships. Do not edit it by hand: record what a component cannot say for its
 | katex | 0.19.1 | MIT | https://katex.org |
 | marked | 18.2.1 | MIT | https://marked.js.org |
 | nostics | 1.4.0 | MIT | https://github.com/vercel-labs/nostics#readme |
-| nuxt | 4.6.4 | MIT | https://nuxt.com |
+| nuxt | 4.7.0 | MIT | https://nuxt.com |
 | object-identity | 0.2.3 | MIT | https://github.com/maraisr/object-identity |
 | ofetch | 1.5.1 | MIT | unjs/ofetch |
 | ohash | 2.0.12 | MIT | unjs/ohash |

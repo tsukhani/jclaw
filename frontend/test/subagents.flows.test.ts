@@ -22,7 +22,10 @@ import PeekPanel from '~/components/PeekPanel.vue'
  */
 
 const routeQuery = { value: {} as Record<string, string> }
-mockNuxtImport('useRoute', () => () => ({ query: routeQuery.value }))
+// A whole route, not just its query: <NuxtLink> iterates the current route's `matched`.
+mockNuxtImport('useRoute', () => () => ({
+  query: routeQuery.value, path: '/subagents', params: {}, fullPath: '/subagents', hash: '', name: 'subagents', meta: {}, matched: [],
+}))
 
 /** Mount with a sibling ConfirmDialog so confirm() flows render (the dialog
  *  reads useConfirm()'s module-singleton state; in prod it lives at app root). */
