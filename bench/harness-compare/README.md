@@ -85,11 +85,11 @@ A full run took 31 minutes on the abundent server (2026-11-24): about a minute t
 
 Update the benchmark itself with `git -C ~/jclaw pull` as `harnessbench`.
 
-Exit codes: 0 for a run that passed conformance, 1 for one that failed it or failed to run, 3 for an unapproved plugin pin.
+Exit codes: 0 for a run that passed conformance, 1 for one that failed it or failed to run, 2 for a malformed plugin pin, 3 for an unapproved one.
 
 ### Approving Hermes's plugin pin
 
-Hermes's catalog pins the web-ollama-cloud plugin to one commit, and the run installs only a commit someone has reviewed: one listed in `approved-plugin-pins.txt` here, or in `~/harness-bench/approved-plugin-pins.txt`. When a new Hermes release moves the pin, the run stops with exit code 3 and prints a link comparing the last approved commit with the new one. Read the change. The plugin should call only Ollama's `/api/web_search` and `/api/web_fetch`. Then run again with `--approve-hermes-plugin <sha>`.
+Hermes's catalog pins the web-ollama-cloud plugin to one commit of one repository. The run installs it only when that exact pair has been reviewed, meaning it is listed in `approved-plugin-pins.txt` here or in `~/harness-bench/approved-plugin-pins.txt`. A catalog entry without a full 40-character commit stops the run with exit code 2. When a new Hermes release moves the pin, the run stops with exit code 3 and prints a link comparing the last approved commit with the new one. Read the change: the plugin should call only Ollama's `/api/web_search` and `/api/web_fetch`. Then run again with `--approve-hermes-plugin <commit>`, which records the pair only if the catalog pins that commit. A new repository has no earlier commit to compare with, so review it in full.
 
 ## Reading the results
 

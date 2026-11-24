@@ -1,4 +1,6 @@
-# Commits of rriggs/hermes-plugin-ollama-cloud-search reviewed for the benchmark: the plugin calls only Ollama's
-# /api/web_search and /api/web_fetch with the configured key, and has no hooks. run.sh installs Hermes's catalog pin
-# only when it is listed here or in $BENCH_HOME/approved-plugin-pins.txt (where --approve-hermes-plugin adds it).
-9c739a9ea5985e0ba86c20d7160af06382c2198e 2026-11-13 reviewed for JF-399 (Hermes catalog pin from 2026-11-13 to at least v0.23.4)
+# Commits of Hermes's web-ollama-cloud plugin reviewed for the benchmark, one per line as
+# `<commit> <repository> <date> <note>`: run.sh installs the plugin only when Hermes's catalog pins exactly a listed
+# commit of exactly that repository. --approve-hermes-plugin adds a pair to $BENCH_HOME/approved-plugin-pins.txt.
+# Reviewed means the plugin calls only Ollama's /api/web_search and /api/web_fetch with the configured key and
+# registers no hooks.
+9c739a9ea5985e0ba86c20d7160af06382c2198e https://github.com/rriggs/hermes-plugin-ollama-cloud-search 2026-11-13 reviewed for JF-399; Hermes's catalog pin through at least v0.23.4

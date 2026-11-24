@@ -149,17 +149,13 @@ HERMES_DIR=$BENCH_HOME/work/hermes-agent
 HERMES_COMMIT=$(checkout "$HERMES_DIR" https://github.com/NousResearch/hermes-agent.git "$HERMES_REF")
 CATALOG=$HERMES_DIR/plugin-catalog/web-ollama-cloud.yaml
 [ -f "$CATALOG" ] || die "Hermes $HERMES_REF has no web-ollama-cloud entry in its plugin catalog, so it has no Ollama web search"
-PLUGIN_SHA=$(sed -n 's/^sha: *//p' "$CATALOG" | head -n 1)
-PLUGIN_REPO=$(sed -n 's/^repo: *//p' "$CATALOG" | head -n 1)
 APPROVED_LOCAL=$BENCH_HOME/approved-plugin-pins.txt
-[ -n "$APPROVE_PIN" ] && [ "$APPROVE_PIN" = "$PLUGIN_SHA" ] && echo "$PLUGIN_SHA $(date -u +%F) approved for $HERMES_REF" >>"$APPROVED_LOCAL"
-if ! grep -h -q "^$PLUGIN_SHA" "$HERE/approved-plugin-pins.txt" "$APPROVED_LOCAL" 2>/dev/null; then
-    last=$(grep -h -o '^[0-9a-f]\{40\}' "$HERE/approved-plugin-pins.txt" "$APPROVED_LOCAL" 2>/dev/null | tail -n 1)
-    printf 'Hermes %s pins its web-ollama-cloud plugin to a commit not yet approved:\n  %s at %s\n' "$HERMES_REF" "$PLUGIN_REPO" "$PLUGIN_SHA" >&2
-    [ -n "$last" ] && printf 'Review the change since the last approved commit:\n  %s/compare/%s...%s\n' "$PLUGIN_REPO" "$last" "$PLUGIN_SHA" >&2
-    printf 'then rerun with --approve-hermes-plugin %s\n' "$PLUGIN_SHA" >&2
-    exit 3
+if [ -n "$APPROVE_PIN" ]; then
+    node "$LIB/pins.mjs" approve "$CATALOG" "$APPROVE_PIN" "$APPROVED_LOCAL" || die "--approve-hermes-plugin $APPROVE_PIN was not recorded"
 fi
+pin_status=0
+PLUGIN_SHA=$(node "$LIB/pins.mjs" check "$CATALOG" "$HERE/approved-plugin-pins.txt" "$APPROVED_LOCAL") || pin_status=$?
+[ "$pin_status" = 0 ] || exit "$pin_status"
 
 # ─── JClaw ──────────────────────────────────────────────────────────────────
 log "Installing JClaw $JCLAW_TAG"
