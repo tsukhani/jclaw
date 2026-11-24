@@ -253,6 +253,16 @@ check_java() {
     HOST_JAVA=''
     JRE_UNRUNNABLE=''
     _host_java_home=${JAVA_HOME:-}
+    # jclaw.sh starts on $JRE_DIR whatever PATH holds, so an upgrade keeps that JRE: replacing it would delete
+    # files the running JClaw has open, and on Windows stops at its locked jvm.dll (JF-559).
+    if upgrading; then
+        _jbin=$(managed_java)
+        if [ -n "$_jbin" ] && java_ok "$_jbin"; then
+            use_jre "$_jbin"
+            substep "Java $JV detected ${DIM}($(command -v java))${RESET}"
+            return
+        fi
+    fi
     if java_ok; then
         if upgrading || [ -n "$JCLAW_NO_JRE" ] || [ -z "$ARCH" ]; then
             substep "Java $JV detected ${DIM}($(command -v java))${RESET}"
@@ -394,14 +404,23 @@ provision_jre() {
     tar -xzf "$_tb" -C "$JRE_DIR" || die "failed to unpack the JRE archive."
     rm -rf "$TMP_JRE"; TMP_JRE=''
 
-    # Locate bin/java — handles the macOS zulu-25.jre/Contents/Home nesting and Linux flat.
-    _jbin=$(find "$JRE_DIR" -type f -name java -path '*/bin/java' 2>/dev/null | head -n1)
+    _jbin=$(managed_java)
     [ -n "$_jbin" ] || die "unpacked the JRE but found no bin/java under $JRE_DIR."
-    JAVA_HOME=$(CDPATH='' cd -- "$(dirname "$(dirname "$_jbin")")" && pwd)
+    use_jre "$_jbin"
+    substep "installed → ${DIM}$JAVA_HOME${RESET}"
+}
+
+# The bin/java under $JRE_DIR, empty when there is none: the macOS zulu-25.jre/Contents/Home nesting or Linux flat.
+managed_java() {
+    find "$JRE_DIR" -type f -name java -path '*/bin/java' 2>/dev/null | head -n1
+}
+
+# Put the JRE whose bin/java is $1 first on PATH, as JAVA_HOME, for the rest of this run.
+use_jre() {
+    JAVA_HOME=$(CDPATH='' cd -- "$(dirname "$(dirname "$1")")" && pwd)
     export JAVA_HOME
     PATH="$JAVA_HOME/bin:$PATH"
     export PATH
-    substep "installed → ${DIM}$JAVA_HOME${RESET}"
 }
 
 # Verify a download against an expected sha256. Fatal on mismatch; warns (but

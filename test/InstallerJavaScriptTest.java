@@ -25,8 +25,8 @@ import java.util.regex.Pattern;
  * Runs install.sh's {@code check_java} under {@code /bin/sh}, as {@code curl … | sh} does, with stub
  * {@code java}s for the host and a stub {@code curl} serving Azul's catalog and a stub Zulu JRE, so each
  * way an install picks the Java it runs on is tested as written: a fresh install gets the Zulu JRE in
- * {@code $JCLAW_HOME/jre} even beside a usable host Java, and the host's Java is used only when asked
- * for, where Azul has no JRE, or by an upgrade.
+ * {@code $JCLAW_HOME/jre} even beside a usable host Java, the host's Java is used only when asked for or
+ * where Azul has no JRE, and an upgrade keeps the Java the install runs on, its own JRE or the host's.
  */
 class InstallerJavaScriptTest extends UnitTest {
 
@@ -34,7 +34,7 @@ class InstallerJavaScriptTest extends UnitTest {
             "JCLAW_FORCE_REINSTALL", "APP_DIR", "JRE_DIR", "MIN_JAVA", "JAVA_MODULE", "AZUL_API", "TTY");
     private static final List<String> FUNCTIONS = List.of("step", "substep", "warn", "die", "check_java", "upgrading",
             "java_ok", "want_jre", "find_jre", "provision_jre", "verify_sha256", "http_get", "java_missing", "download",
-            "record_unrunnable_jre");
+            "record_unrunnable_jre", "managed_java", "use_jre");
 
     private static final String TOP = "zulu25.38.107-ca-jre25.0.5-linux_x64";
     private static final String TARBALL = TOP + ".tar.gz";
@@ -168,16 +168,15 @@ class InstallerJavaScriptTest extends UnitTest {
     }
 
     @Test
-    void aFailedDownloadWithNoChecksumLeavesTheJreAnUpgradeRunsOnInPlace() throws Exception {
+    void aFailedDownloadWithNoChecksumLeavesTheJreAlreadyInPlace() throws Exception {
         existingInstall();
-        var old = Files.createDirectories(tmp.resolve("home/jre/" + OLD_TOP + "/bin"));
-        executable(old.resolve("java"), javaScript("25.0.4"));
+        var own = ownJre("25.0.4");
         catalog(catalogFor("").replace(",\"sha256_hash\":\"\"", ""));
 
         assertEquals(new Result(1, NO_JAVA + "==> Installing Zulu JRE 25 (linux/x64)\n    " + TARBALL + "\n"
                 + "error: couldn't download the Zulu JRE from https://cdn.azul.com/zulu/bin/" + TARBALL + ".\n"),
-                install(null, Map.of("CDN_DOWN", "1")));
-        assertTrue(Files.isExecutable(old.resolve("java")), "the JRE the install runs on was deleted");
+                install(null, Map.of("CDN_DOWN", "1", "JCLAW_FORCE_REINSTALL", "1")));
+        assertTrue(Files.isExecutable(own.resolve("bin/java")), "a failed download deleted the JRE already there");
     }
 
     @Test
@@ -218,6 +217,38 @@ class InstallerJavaScriptTest extends UnitTest {
         existingInstall();
 
         assertEquals(new Result(0, managedInstall("Java was not found on your PATH.")), install(null, Map.of()));
+    }
+
+    // jclaw.sh starts on $JCLAW_HOME/jre whatever PATH holds, and a JRE replaced there would be the one JClaw runs on.
+    @Test
+    void anUpgradeOnItsOwnJreWithNoJavaOnPathKeepsThatJreAndDownloadsNothing() throws Exception {
+        existingInstall();
+        var own = ownJre("25.0.4");
+
+        assertEquals(new Result(0, "    Java 25 detected (" + own + "/bin/java)\njava=" + own + "/bin/java\n"),
+                install(null, Map.of()));
+        assertEquals(List.of(), calls());
+        assertTrue(Files.isExecutable(own.resolve("bin/java")), "the JRE the install runs on was replaced");
+    }
+
+    @Test
+    void anUpgradeOnItsOwnJreBesideAUsableHostJavaKeepsItsOwnJre() throws Exception {
+        var host = hostJava("25.0.3");
+        existingInstall();
+        var own = ownJre("25.0.4");
+
+        assertEquals(new Result(0, "    Java 25 detected (" + own + "/bin/java)\njava=" + own + "/bin/java\n"),
+                install(host, Map.of()));
+        assertEquals(List.of(), calls());
+    }
+
+    @Test
+    void anUpgradeWhoseOwnJreIsBelowJava25GetsTheZuluJre() throws Exception {
+        existingInstall();
+        ownJre("24.0.2");
+
+        assertEquals(new Result(0, managedInstall("Java was not found on your PATH.")), install(null, Map.of()));
+        assertEquals(List.of("curl -fsSL " + CATALOG_QUERY, cdnCall()), anonymousCalls());
     }
 
     @Test
@@ -323,6 +354,13 @@ class InstallerJavaScriptTest extends UnitTest {
 
     private String managedHome() {
         return tmp.resolve("home/jre/" + TOP).toString();
+    }
+
+    /** An earlier Zulu JRE at {@code $JCLAW_HOME/jre}, as a fresh install left it, reporting {@code version}; its home. */
+    private Path ownJre(String version) throws IOException {
+        var bin = Files.createDirectories(tmp.resolve("home/jre/" + OLD_TOP + "/bin"));
+        executable(bin.resolve("java"), javaScript(version));
+        return bin.getParent();
     }
 
     /** An install the installer would hand to {@code jclaw.sh upgrade}. */
