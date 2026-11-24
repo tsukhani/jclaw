@@ -1,0 +1,201 @@
+// Writes report.md for a finished run and, when the run passed conformance, appends its summary to history.jsonl.
+// A run is compared with the previous and the first run of the same host and model: a median that moved by at least
+// MARKED_SHARE and left the previous run's 25th–75th percentile range is a marked change.
+// Usage: node report.mjs [--run-dir dir] [--history file]
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { parseArgs } from 'node:util'
+import { config, HARNESSES, isMain } from './config.mjs'
+import { readJsonl, quantile } from './analyze.mjs'
+
+export const MARKED_SHARE = 0.2
+const N = { jclaw: 'JClaw', openclaw: 'OpenClaw', hermes: 'Hermes' }
+const LABEL = {
+  question: 'One-line factual question, fresh conversation', followup: 'Follow-up in the same conversation (second turn timed)',
+  summary: 'Summary of a 3,009-word passage', reasoning: 'Multi-step reasoning, one right answer', json: 'Reply in a fixed JSON shape',
+  fiveturn: 'Five-turn conversation (all five turns timed)', search1: 'One web search', search3: 'Three independent web searches',
+}
+const f = v => (v == null || Number.isNaN(v) ? '–' : Math.abs(v) >= 10 ? Math.round(v).toLocaleString('en-US') : v.toFixed(1))
+const rng = (s, k) => `${f(s[`${k}P50`])} [${f(s[`${k}P25`])}–${f(s[`${k}P75`])}]`
+const med = a => quantile(a, 0.5)
+
+export function compare(prev, cur) {
+  const changes = []
+  for (const [key, now] of Object.entries(cur)) {
+    const was = prev[key]
+    if (!was) continue
+    for (const k of ['own', 'e2e']) {
+      const a = was[`${k}P50`]
+      const b = now[`${k}P50`]
+      if (a == null || b == null || a === 0) continue
+      const share = (b - a) / a
+      const outside = b < was[`${k}P25`] || b > was[`${k}P75`]
+      if (Math.abs(share) >= MARKED_SHARE && outside) changes.push({ key, metric: k, was: a, now: b, share })
+    }
+  }
+  return changes
+}
+
+function e2eNote(S, task) {
+  const j = S[`${task}|jclaw`]
+  return ['openclaw', 'hermes'].filter(h => S[`${task}|${h}`]).map(h => {
+    const o = S[`${task}|${h}`]
+    if (j.e2eP75 < o.e2eP25) return `faster than ${N[h]}`
+    if (j.e2eP25 > o.e2eP75) return `slower than ${N[h]}`
+    return `no measurable difference from ${N[h]}`
+  }).join('; ')
+}
+
+export function render({ analysis, conformance, versions, turns, history, host }) {
+  const { meta, rows, summary: S, background } = analysis
+  const model = meta.model ?? config.model
+  const out = []
+  const p = (s = '') => out.push(s)
+  const same = history.filter(e => e.host === host && e.model === model)
+  const prev = same.at(-1)
+  const first = same[0]
+  p(`# JClaw against OpenClaw and Hermes: ${meta.at.slice(0, 10)} on ${host}`)
+  p()
+  p(`Run ${meta.at} to ${turns.find(l => l.kind === 'end')?.at ?? '?'}: ${meta.runs} runs of ${meta.tasks.length} tasks in each harness, model \`${model}\` with thinking off, \`${config.searchTool}\` the only tool.`)
+  p()
+  p('| Harness | Version | Commit |')
+  p('|---|---|---|')
+  for (const h of HARNESSES) p(`| ${N[h]} | ${versions[h]?.tag ?? '?'} | ${versions[h]?.commit ? `\`${versions[h].commit.slice(0, 12)}\`` : '–'} |`)
+  if (versions.hermesPlugin) p(`| Hermes search plugin | web-ollama-cloud | \`${versions.hermesPlugin.slice(0, 12)}\` |`)
+  p()
+
+  p('## Conformance')
+  p()
+  if (conformance.pass) p(`All ${conformance.results.length} checks passed, so the comparison below is like for like.`)
+  else p(`**No verdict: ${conformance.results.filter(r => !r.pass).length} of ${conformance.results.length} checks failed.** A harness update probably changed a setting the benchmark relies on; fix the setup before reading the numbers below.`)
+  p()
+  p('| Check | ' + HARNESSES.map(h => N[h]).join(' | ') + ' |')
+  p('|---|' + HARNESSES.map(() => '---').join('|') + '|')
+  for (const name of [...new Set(conformance.results.map(r => r.name))]) {
+    const cells = HARNESSES.map(h => {
+      const r = conformance.results.find(x => x.name === name && x.harness === h)
+      return !r ? '–' : r.pass ? (r.notes?.length ? `pass (${r.detail}: ${r.notes.join('; ')})` : 'pass') : `**FAIL**: ${r.failures.join('; ')}${r.failureCount > r.failures.length ? ` (+${r.failureCount - r.failures.length} more)` : ''}`
+    })
+    p(`| ${name} | ${cells.join(' | ')} |`)
+  }
+  p()
+
+  if (conformance.pass) {
+    p('## Verdict')
+    p()
+    const ratios = meta.tasks.map(t => {
+      const others = ['openclaw', 'hermes'].map(h => [h, S[`${t}|${h}`]?.ownP50]).filter(([, v]) => v != null)
+      const [bh, bv] = others.reduce((a, b) => (b[1] < a[1] ? b : a))
+      return { t, j: S[`${t}|jclaw`].ownP50, bh, bv, ratio: S[`${t}|jclaw`].ownP50 / bv }
+    })
+    const comparable = ratios.filter(r => r.ratio <= config.bar).length
+    p(`JClaw is comparable on ${comparable} of ${ratios.length} tasks: its median own time per turn is no more than ${config.bar.toFixed(2)} of the faster of the other two. Own time leaves out the model's time.`)
+    p()
+    p(`| Task | JClaw own, median | Faster other, median | Ratio | Comparable (≤ ${config.bar.toFixed(2)}) | End to end |`)
+    p('|---|---|---|---|---|---|')
+    for (const r of ratios) p(`| ${r.t} | ${f(r.j)} ms | ${f(r.bv)} ms (${N[r.bh]}) | ${r.ratio.toFixed(2)} | ${r.ratio <= config.bar ? 'yes' : '**no**'} | ${e2eNote(S, r.t)} |`)
+    p()
+    p('End to end: where the 25th–75th percentile ranges overlap, the runs show no measurable difference.')
+    p()
+
+    p('## Changes since earlier runs')
+    p()
+    if (!prev) p(`This is the first run on ${host} with \`${model}\`, so it is the baseline for later runs.`)
+    if (!prev) p()
+    for (const [label, base] of [['the previous run', prev], ['the first run', first !== prev ? first : null]]) {
+      if (!base) continue
+      const vs = HARNESSES.filter(h => base.versions?.[h]?.tag !== versions[h]?.tag).map(h => `${N[h]} ${base.versions?.[h]?.tag ?? '?'} → ${versions[h]?.tag}`)
+      const marked = compare(base.summary, S)
+      p(`**Against ${label}** (${base.at.slice(0, 16).replace('T', ' ')} UTC): ${vs.length ? `versions changed: ${vs.join(', ')}` : 'no version changed'}.`)
+      p()
+      if (!marked.length) { p(`No marked change: no median own or end-to-end time moved by ${MARKED_SHARE * 100}% or more and out of that run's 25th–75th percentile range.`); p(); continue }
+      p('| Task | Harness | Measure | Then, median | Now, median | Change |')
+      p('|---|---|---|---|---|---|')
+      for (const c of marked) { const [t, h] = c.key.split('|'); p(`| ${t} | ${N[h]} | ${c.metric === 'own' ? 'own time' : 'end to end'} | ${f(c.was)} ms | ${f(c.now)} ms | ${c.share > 0 ? '+' : ''}${Math.round(c.share * 100)}% |`) }
+      p()
+    }
+  }
+
+  p('## Per-task results')
+  p()
+  p('Medians over the runs, with the 25th–75th percentile in brackets. "Before / between / after" are the three parts of own time.')
+  p()
+  for (const t of meta.tasks) {
+    p(`### ${t}: ${LABEL[t] ?? t}`)
+    p()
+    p('| Harness | Correct | Own time, ms | before / between / after | End to end, ms | First token, ms | Provider, ms | Rounds | Searches | Prompt tokens | Cached tokens | Output tokens |')
+    p('|---|---|---|---|---|---|---|---|---|---|---|---|')
+    for (const h of HARNESSES) {
+      const s = S[`${t}|${h}`]
+      if (!s) continue
+      p(`| ${N[h]} | ${s.correct}/${s.of} | ${rng(s, 'own')} | ${f(s.beforeP50)} / ${f(s.betweenP50)} / ${f(s.afterP50)} | ${rng(s, 'e2e')} | ${rng(s, 'ttft')} | ${f(s.providerP50)} | ${f(s.roundsP50)} | ${f(s.searchesP50)} | ${f(s.promptP50)} | ${s.cacheReported ? f(s.cachedP50) : 'not reported'} | ${f(s.outputP50)} |`)
+    }
+    p()
+  }
+  const good = rows.filter(r => !r.bad && r.timed)
+  if (meta.tasks.includes('fiveturn')) {
+    p('### Five-turn conversation, by turn')
+    p()
+    p('| Turn | ' + HARNESSES.map(h => `${N[h]} own / e2e / prompt`).join(' | ') + ' |')
+    p('|---|' + HARNESSES.map(() => '---').join('|') + '|')
+    for (let i = 1; i <= 5; i++) {
+      p(`| ${i} | ` + HARNESSES.map(h => {
+        const rs = good.filter(r => r.harness === h && r.task === 'fiveturn' && r.turn === i)
+        return rs.length ? `${f(med(rs.map(r => r.own)))} / ${f(med(rs.map(r => r.e2e)))} / ${f(med(rs.map(r => r.promptTokens)))}` : '–'
+      }).join(' | ') + ' |')
+    }
+    p()
+  }
+  const web = meta.tasks.filter(t => t.startsWith('search'))
+  if (web.length) {
+    p('### Web tasks: searches per first reply and concurrency')
+    p()
+    p('| Task | Harness | Searches the first reply asked for | Rounds with searches at the same time | Search time, median ms |')
+    p('|---|---|---|---|---|')
+    for (const t of web) for (const h of HARNESSES) {
+      const s = S[`${t}|${h}`]
+      if (s) p(`| ${t} | ${N[h]} | ${s.firstReplyCalls.join(', ')} | ${s.parallelRounds} of ${s.n} | ${f(s.searchMsP50)} |`)
+    }
+    p()
+  }
+  p('### All timed turns')
+  p()
+  p('| Harness | Turns | Correct | Own time, median ms | before / between / after | End to end, median ms | Auxiliary calls in turns | Background calls after turns | Requests the proxy corrected |')
+  p('|---|---|---|---|---|---|---|---|---|')
+  for (const h of HARNESSES) {
+    const rs = good.filter(r => r.harness === h)
+    if (!rs.length) continue
+    const bg = background[h] ?? []
+    const injected = rows.filter(r => r.harness === h).reduce((s, r) => s + (r.injected ?? 0), 0)
+    p(`| ${N[h]} | ${rs.length} | ${rs.filter(r => r.correct).length} | ${f(med(rs.map(r => r.own)))} | ${f(med(rs.map(r => r.before)))} / ${f(med(rs.map(r => r.between)))} / ${f(med(rs.map(r => r.after)))} | ${f(med(rs.map(r => r.e2e)))} | ${rs.reduce((s, r) => s + r.auxCalls, 0)} | ${bg.length} (${f(bg.reduce((s, b) => s + b.ms, 0) / 1000)} s at the provider) | ${injected ? `${injected} given reasoning_effort` : '–'} |`)
+  }
+  p()
+  const wrong = turns.filter(l => l.kind === 'turn' && l.timed && !l.correct)
+  p('## Wrong or failed answers')
+  p()
+  if (!wrong.length) p('None.')
+  for (const w of wrong) p(`- ${N[w.harness]}, ${w.task}#${w.turn}, run ${w.run}: ${w.error ? `error: ${w.error}` : JSON.stringify((w.text ?? '').slice(0, 200))}`)
+  p()
+  p('Raw data in this run folder: `turns.jsonl` (one line per turn, with the answer), `proxy/proxy-*.jsonl` (one line per request), `analysis.json`, `conformance.json`, `versions.json`.')
+  return out.join('\n') + '\n'
+}
+
+if (isMain(import.meta.url)) {
+  const { values } = parseArgs({ options: { 'run-dir': { type: 'string', default: process.env.RUN_DIR }, history: { type: 'string', default: process.env.BENCH_HISTORY } } })
+  const dir = values['run-dir']
+  const read = n => JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8'))
+  const analysis = read('analysis.json')
+  const conformance = read('conformance.json')
+  const versions = read('versions.json')
+  const turns = readJsonl(path.join(dir, 'turns.jsonl'))
+  const history = values.history ? readJsonl(values.history) : []
+  const host = process.env.BENCH_HOST ?? os.hostname().split('.')[0]
+  fs.writeFileSync(path.join(dir, 'report.md'), render({ analysis, conformance, versions, turns, history, host }))
+  if (conformance.pass && values.history) {
+    const keep = ['ownP50', 'ownP25', 'ownP75', 'e2eP50', 'e2eP25', 'e2eP75', 'correct', 'of']
+    const summary = Object.fromEntries(Object.entries(analysis.summary).map(([k, v]) => [k, Object.fromEntries(keep.map(x => [x, v[x]]))]))
+    fs.appendFileSync(values.history, JSON.stringify({ at: analysis.meta.at, host, model: analysis.meta.model ?? config.model, runDir: dir, versions, summary }) + '\n')
+  }
+  console.log(`report: ${path.join(dir, 'report.md')}${conformance.pass ? '' : ' (conformance failed: no verdict, not added to the history)'}`)
+}

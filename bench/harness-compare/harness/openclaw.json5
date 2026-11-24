@@ -1,0 +1,45 @@
+// OpenClaw for the benchmark: the model on Ollama Cloud through the timing proxy, web_search the only tool,
+// thinking off, no fallback, and no discovery, catalog or update calls. Prompt content (the workspace files and
+// skills) stays at OpenClaw's defaults. OpenClaw's schema rejects an unknown key, so a renamed setting stops the
+// gateway at start rather than being ignored.
+{
+  gateway: {
+    mode: "local", port: {{OPENCLAW_PORT}}, bind: "loopback",
+    auth: { mode: "token" },
+    http: { endpoints: { chatCompletions: { enabled: true } } },
+  },
+  update: { checkOnStart: false },
+  discovery: { mdns: { mode: "off" } },
+  models: {
+    catalogRefresh: { enabled: false },
+    providers: {
+      ollama: {
+        baseUrl: "{{PROXY_URL}}",
+        api: "ollama",
+        // A key under OLLAMA_API_KEY would also send web search straight to ollama.com when the proxy answers 404.
+        apiKey: { source: "env", provider: "default", id: "BENCH_OLLAMA_KEY" },
+        models: [{ id: "{{MODEL}}", name: "{{MODEL}}", reasoning: true, input: ["text"],
+                   contextWindow: {{CONTEXT_WINDOW}}, maxTokens: {{MAX_TOKENS}} }],
+      },
+    },
+  },
+  agents: {
+    defaults: {
+      model: { primary: "ollama/{{MODEL}}", fallbacks: [] },
+      modelPolicy: { allow: ["ollama/{{MODEL}}"] },
+      thinkingDefault: "off",
+    },
+  },
+  tools: {
+    allow: ["web_search"],
+    deny: ["group:runtime", "group:fs", "web_fetch", "x_search", "group:ui", "group:memory", "group:sessions",
+           "group:automation", "group:messaging", "group:nodes", "group:media", "group:agents", "node_inference"],
+    // Tool Search and Code Mode are tools too; either would wrap web_search behind another call.
+    toolSearch: false,
+    codeMode: false,
+    web: { search: { enabled: true, provider: "ollama" }, fetch: { enabled: false } },
+  },
+  // Memory search defaults to OpenAI embeddings, a second provider.
+  memory: { search: { enabled: false } },
+  plugins: { entries: { ollama: { config: { discovery: { enabled: false } } } } },
+}

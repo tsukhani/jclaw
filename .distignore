@@ -56,6 +56,8 @@ sidecar/video/.gitignore
 .claude/
 .codex/
 .sandcastle/
+# The harness benchmark (JF-599) runs on a test host from its own checkout; no install needs it.
+bench/
 renovate.json5
 .github/
 .java-version

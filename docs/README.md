@@ -22,7 +22,7 @@ Everything that explains the code is documentation: the Markdown, the comments a
 | Contribution guide | `CONTRIBUTING.md` | contributors | the workflow and hooks; its policy lines are rules, not claims | fix facts, report policy |
 | User guide | `docs/user-guide/*.md` | operators in the app, agents through `jclaw_docs` | the `.vue` source for every on-screen string, `app/` for behaviour | fix |
 | Guide index for agents | `docs/user-guide/llms.txt` | agents, wherever the guide is published | the guide pages its notes summarize; titles and order are `sections.ts`, pinned by `frontend/test/llms-txt.test.ts` | fix |
-| Component READMEs | `sidecar/*/README.md`, `bin/README.md`, `evals/README.md`, `evals/*/README.md`, `evals/graph/GUIDE.md`, `frontend/tests/e2e/README.md`, `.sandcastle/README.md` | maintainers | the component's code; `bin/README.md` and `evals/README.md` are format contracts | fix |
+| Component READMEs | `sidecar/*/README.md`, `bin/README.md`, `evals/README.md`, `evals/*/README.md`, `evals/graph/GUIDE.md`, `frontend/tests/e2e/README.md`, `.sandcastle/README.md`, `bench/harness-compare/README.md` | maintainers | the component's code; `bin/README.md` and `evals/README.md` are format contracts | fix |
 | Architecture snapshot | `docs/architecture/*.md`, except plan documents such as `jclaw-agentic-refactor.md` | maintainers | the code; nothing regenerates it | facts only |
 
 ## In-code documentation
@@ -32,7 +32,7 @@ Everything that explains the code is documentation: the Markdown, the comments a
 | Javadoc | `/** */` in `app/` and `test/`, including `package-info.java` | maintainers, IDE hovers | the declaration it documents; every `{@link}` resolves | fix + gate |
 | Code comments | `//` and `/* */` in Java, JavaScript, TypeScript, Vue, CSS; `<!-- -->` in templates | maintainers | the code beside them, and any twin they say they mirror | fix + gate |
 | Python comments and docstrings | `sidecar/**/*.py` | maintainers | the endpoints, flags and defaults in that sidecar | fix + gate |
-| Script comments | `jclaw.sh`, `install.sh`, `install-docker.sh`, `install.ps1`, `bin/*.sh`, `.sandcastle/*.sh`, `docker-*.sh`, `loadtest/audit.sh`, `.githooks/*` | maintainers | the script | fix + gate |
+| Script comments | `jclaw.sh`, `install.sh`, `install-docker.sh`, `install.ps1`, `bin/*.sh`, `.sandcastle/*.sh`, `docker-*.sh`, `loadtest/audit.sh`, `.githooks/*`, `bench/harness-compare/*.sh` | maintainers | the script | fix + gate |
 | Config and build comments | `conf/application.conf` (the record for every unseeded key), `conf/routes`, `build.gradle.kts`, `Dockerfile`, `docker-compose.yml`, `Jenkinsfile`, `Jenkinsfile.renovate`, `renovate.json5`, `frontend/nuxt.config.ts`, `settings.gradle.kts`, `gradle/*.gradle.kts`, `gradle.properties`, `conf/archunit.properties`, `.devcontainer/Dockerfile`, `frontend/pnpm-workspace.yaml`, `.gitignore`, `.distignore` | maintainers, operators editing `conf/` | the code that reads the key, its default, the build | fix + gate |
 
 ## Text that ships as behaviour

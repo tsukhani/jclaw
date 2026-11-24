@@ -1,0 +1,26 @@
+# Hermes for the benchmark: the model on Ollama Cloud through the timing proxy, web search the only tool, thinking
+# off, no fallback, no search-result cache and no keyless search fallback. Prompt content (SOUL.md, memory) stays at
+# Hermes's defaults. Hermes ignores an unknown key, so the run's conformance checks are what catch a renamed one.
+model:
+  provider: ollama-cloud
+  default: {{MODEL}}
+  base_url: {{PROXY_URL}}/v1
+  # A known context length skips the metadata probes Hermes sends a loopback address.
+  context_length: {{CONTEXT_WINDOW}}
+fallback_providers: []
+agent:
+  reasoning_effort: none
+platform_toolsets:
+  api_server: [search, no_mcp]
+web:
+  search_backend: ollama-cloud
+  keyless_rescue: false
+  keyless_fallback: false
+  cache_enabled: false
+  ollama-cloud:
+    base_url: {{PROXY_URL}}
+    timeout: 30
+updates:
+  check: false
+plugins:
+  auto_update_check_hours: 0
