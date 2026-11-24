@@ -47,6 +47,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -807,9 +808,14 @@ class JavaRuntimeServiceTest extends UnitTest {
                 stalledDownload(Protocol.H2_PRIOR_KNOWLEDGE, new SocketEffect.CloseSocket()));
     }
 
+    // OkHttp 5 puts an HTTP/1.1 read timeout on the socket (the JDK's "Read timed out") and on Okio's source ("timeout")
+    // alike, so whichever fires first names it (RealConnection.kt). HTTP/2 sets soTimeout to 0, which is why its cases
+    // pin one message.
     @Test
     void anHttp1DownloadWhoseServerStallsMidBodyEndsAtTheReadTimeoutAndStagesNothing() throws Exception {
-        assertEquals("http/1.1 SocketTimeoutException: timeout", stalledDownload(Protocol.HTTP_1_1, SocketEffect.Stall.INSTANCE));
+        var ended = stalledDownload(Protocol.HTTP_1_1, SocketEffect.Stall.INSTANCE);
+        assertTrue(Set.of("http/1.1 SocketTimeoutException: timeout", "http/1.1 SocketTimeoutException: Read timed out")
+                .contains(ended), ended);
     }
 
     @Test
