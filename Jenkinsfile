@@ -590,91 +590,95 @@ pipeline {
             }
         }
 
-        stage('Upgrade Rehearsal') {
-            // The test database is created fresh for every run, so nothing else applies a release's schema change to
-            // populated rows: the last published release, seeded with invented data, is upgraded to this candidate's
-            // bundle by that release's own `jclaw.sh upgrade`, and must read the data back unchanged (JF-450).
+        stage('Candidate Artifacts') {
+            // Side by side, since neither reads what the other writes: the rehearsal takes only dist/jclaw-bundle.zip and
+            // works under mktemp on ports from 19400, and the image builds from a context .dockerignore keeps dist/ out of.
+            // No failFast, as on Test: each branch is a verdict of its own (JF-579).
             when {
                 expression { params.CANDIDATE }
             }
-            steps {
-                withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
-                    sh 'bin/upgrade-rehearsal.sh dist/jclaw-bundle.zip'
-                }
-            }
-        }
-
-        stage('Candidate Image') {
-            // The image a release publishes is this one, by digest: built and booted here, where a failure costs
-            // nothing, rather than built for the first time by the RELEASE build (JF-449).
-            when {
-                expression { params.CANDIDATE }
-            }
-            steps {
-                script {
-                    qemuPrelude()
-                    candidateRegistry()
-                    // Backstop for the Dockerfile's per-fetch retries; re-pushing the same tag is idempotent.
-                    // The runtime stage is rebuilt from a fresh pull every time: a reused apt layer shipped v1.0.24
-                    // with a Zulu older than the Java4Shell fix (JF-533). The bundle stage stays cached.
-                    retry(2) {
-                        sh """
-                            docker buildx build \\
-                                --builder jclaw-candidate-builder \\
-                                --pull \\
-                                --no-cache-filter runtime \\
-                                --provenance=false \\
-                                --platform linux/amd64,linux/arm64 \\
-                                -t ${env.CANDIDATE_IMAGE}:${env.BUILD_COMMIT.substring(0, 12)} \\
-                                --metadata-file dist/image-metadata.json \\
-                                --push .
-                        """
+            parallel {
+                stage('Upgrade Rehearsal') {
+                    // The test database is created fresh for every run, so nothing else applies a release's schema change to
+                    // populated rows: the last published release, seeded with invented data, is upgraded to this candidate's
+                    // bundle by that release's own `jclaw.sh upgrade`, and must read the data back unchanged (JF-450).
+                    steps {
+                        withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                            sh 'bin/upgrade-rehearsal.sh dist/jclaw-bundle.zip'
+                        }
                     }
                 }
-                // The digest comes from buildx's record of this push, never from a tag, which anyone who can push
-                // can move.
-                sh '''
-                    digest=$(jq -er '."containerimage.digest"' dist/image-metadata.json)
-                    printf '%s@%s\\n' "$CANDIDATE_IMAGE" "$digest" > dist/CANDIDATE_IMAGE
-                '''
-                // The amd64 image, the one this host runs natively, must boot and report the candidate's version.
-                sh '''
-                    image=$(cat dist/CANDIDATE_IMAGE)
-                    name="jclaw-smoke-$BUILD_NUMBER"
-                    docker rm -f "$name" > /dev/null 2>&1 || true
-                    docker run -d --name "$name" --platform linux/amd64 -p 127.0.0.1::9000 "$image" > /dev/null
-                    trap 'docker rm -f "$name" > /dev/null 2>&1 || true' EXIT
-                    port=$(docker port "$name" 9000/tcp | head -n 1 | sed 's/.*://')
-                    status=""
-                    for i in $(seq 1 90); do
-                        status=$(curl -fsS "http://127.0.0.1:$port/api/status" 2>/dev/null) && break
-                        status=""
-                        [ "$(docker inspect -f '{{.State.Running}}' "$name")" = true ] || break
-                        sleep 2
-                    done
-                    if ! printf '%s' "$status" | jq -e --arg v "$APP_VERSION" '.status == "ok" and .applicationVersion == $v' > /dev/null 2>&1; then
-                        echo "The candidate image did not report ok for $APP_VERSION within 180 s; /api/status answered: ${status:-nothing}. Its log:" >&2
-                        docker logs "$name" 2>&1 | tail -n 60 >&2
-                        exit 1
-                    fi
-                    echo "The candidate image boots and reports $APP_VERSION: $image"
-                '''
-                // Each release's Java, read off its build log. The arm64 half runs under the QEMU the build set up.
-                // Each platform runs by its own manifest's digest: the image's index digest names both, and once pulled
-                // for one platform it cannot be pulled for the other ("cannot overwrite digest", v1.0.26-rc.3).
-                sh '''
-                    image=$(cat dist/CANDIDATE_IMAGE)
-                    index=$(docker buildx imagetools inspect --raw "$image")
-                    pick='[.manifests[] | select(.platform.os == $os and .platform.architecture == $arch) | .digest] | if length == 1 then .[0] else empty end'
-                    for platform in linux/amd64 linux/arm64; do
-                        digest=$(printf '%s' "$index" | jq -r --arg os "${platform%/*}" --arg arch "${platform#*/}" "$pick")
-                        [ -n "$digest" ] || { echo "The candidate image has no single $platform manifest: $image"; exit 1; }
-                        docker pull -q --platform "$platform" "${image%@*}@$digest" > /dev/null
-                        echo "Java in the candidate image, $platform:"
-                        docker run --rm --platform "$platform" --entrypoint sh "${image%@*}@$digest" -c 'exec "$JAVA_HOME/bin/java" -version' 2>&1
-                    done
-                '''
-                archiveArtifacts artifacts: 'dist/CANDIDATE_IMAGE', fingerprint: true
+
+                stage('Candidate Image') {
+                    // The image a release publishes is this one, by digest: built and booted here, where a failure costs
+                    // nothing, rather than built for the first time by the RELEASE build (JF-449).
+                    steps {
+                        script {
+                            qemuPrelude()
+                            candidateRegistry()
+                            // Backstop for the Dockerfile's per-fetch retries; re-pushing the same tag is idempotent.
+                            // The runtime stage is rebuilt from a fresh pull every time: a reused apt layer shipped v1.0.24
+                            // with a Zulu older than the Java4Shell fix (JF-533). The bundle stage stays cached.
+                            retry(2) {
+                                sh """
+                                    docker buildx build \\
+                                        --builder jclaw-candidate-builder \\
+                                        --pull \\
+                                        --no-cache-filter runtime \\
+                                        --provenance=false \\
+                                        --platform linux/amd64,linux/arm64 \\
+                                        -t ${env.CANDIDATE_IMAGE}:${env.BUILD_COMMIT.substring(0, 12)} \\
+                                        --metadata-file dist/image-metadata.json \\
+                                        --push .
+                                """
+                            }
+                        }
+                        // The digest comes from buildx's record of this push, never from a tag, which anyone who can push
+                        // can move.
+                        sh '''
+                            digest=$(jq -er '."containerimage.digest"' dist/image-metadata.json)
+                            printf '%s@%s\\n' "$CANDIDATE_IMAGE" "$digest" > dist/CANDIDATE_IMAGE
+                        '''
+                        // The amd64 image, the one this host runs natively, must boot and report the candidate's version.
+                        sh '''
+                            image=$(cat dist/CANDIDATE_IMAGE)
+                            name="jclaw-smoke-$BUILD_NUMBER"
+                            docker rm -f "$name" > /dev/null 2>&1 || true
+                            docker run -d --name "$name" --platform linux/amd64 -p 127.0.0.1::9000 "$image" > /dev/null
+                            trap 'docker rm -f "$name" > /dev/null 2>&1 || true' EXIT
+                            port=$(docker port "$name" 9000/tcp | head -n 1 | sed 's/.*://')
+                            status=""
+                            for i in $(seq 1 90); do
+                                status=$(curl -fsS "http://127.0.0.1:$port/api/status" 2>/dev/null) && break
+                                status=""
+                                [ "$(docker inspect -f '{{.State.Running}}' "$name")" = true ] || break
+                                sleep 2
+                            done
+                            if ! printf '%s' "$status" | jq -e --arg v "$APP_VERSION" '.status == "ok" and .applicationVersion == $v' > /dev/null 2>&1; then
+                                echo "The candidate image did not report ok for $APP_VERSION within 180 s; /api/status answered: ${status:-nothing}. Its log:" >&2
+                                docker logs "$name" 2>&1 | tail -n 60 >&2
+                                exit 1
+                            fi
+                            echo "The candidate image boots and reports $APP_VERSION: $image"
+                        '''
+                        // Each release's Java, read off its build log. The arm64 half runs under the QEMU the build set up.
+                        // Each platform runs by its own manifest's digest: the image's index digest names both, and once pulled
+                        // for one platform it cannot be pulled for the other ("cannot overwrite digest", v1.0.26-rc.3).
+                        sh '''
+                            image=$(cat dist/CANDIDATE_IMAGE)
+                            index=$(docker buildx imagetools inspect --raw "$image")
+                            pick='[.manifests[] | select(.platform.os == $os and .platform.architecture == $arch) | .digest] | if length == 1 then .[0] else empty end'
+                            for platform in linux/amd64 linux/arm64; do
+                                digest=$(printf '%s' "$index" | jq -r --arg os "${platform%/*}" --arg arch "${platform#*/}" "$pick")
+                                [ -n "$digest" ] || { echo "The candidate image has no single $platform manifest: $image"; exit 1; }
+                                docker pull -q --platform "$platform" "${image%@*}@$digest" > /dev/null
+                                echo "Java in the candidate image, $platform:"
+                                docker run --rm --platform "$platform" --entrypoint sh "${image%@*}@$digest" -c 'exec "$JAVA_HOME/bin/java" -version' 2>&1
+                            done
+                        '''
+                        archiveArtifacts artifacts: 'dist/CANDIDATE_IMAGE', fingerprint: true
+                    }
+                }
             }
         }
 

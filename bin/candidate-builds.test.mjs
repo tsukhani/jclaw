@@ -177,6 +177,21 @@ test("a candidate takes its name from its branch, a vouched push build skips Pac
   strictEqual(check.includes("withCredentials([string(credentialsId: 'Sonar', variable: 'SONAR_TOKEN')])"), true);
 });
 
+test("a candidate rehearses its upgrade and builds its image side by side, and a red branch lets the other finish", () => {
+  const jenkinsfile = readFileSync(join(ROOT, "Jenkinsfile"), "utf8");
+  const at = jenkinsfile.indexOf("stage('Candidate Artifacts')");
+  strictEqual(at > jenkinsfile.indexOf("stage('Package')"), true, "both branches read what Package wrote");
+  const artifacts = jenkinsfile.slice(at, jenkinsfile.indexOf("stage('Release')", at));
+  const parallel = artifacts.indexOf("parallel {");
+  strictEqual(artifacts.indexOf("stage('Upgrade Rehearsal')") > parallel, true);
+  strictEqual(artifacts.indexOf("stage('Candidate Image')") > parallel, true);
+  strictEqual(jenkinsfile.split("stage('Upgrade Rehearsal')").length, 2, "the rehearsal runs only as a branch");
+  strictEqual(jenkinsfile.split("stage('Candidate Image')").length, 2, "the image builds only as a branch");
+  strictEqual(artifacts.split("expression { params.CANDIDATE }").length, 2, "one condition, on the stage that holds both");
+  strictEqual(artifacts.indexOf("expression { params.CANDIDATE }") < parallel, true);
+  strictEqual(/^\s*failFast\b/m.test(artifacts), false, "each branch is a verdict of its own");
+});
+
 // The Cleanup stage's block, run as Jenkins runs it (sh -xe), against a stub gh that lists the release's assets.
 const zipCleanup = (assets, ghExit = 0) => {
   const jenkinsfile = readFileSync(join(ROOT, "Jenkinsfile"), "utf8");
