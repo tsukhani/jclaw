@@ -154,8 +154,9 @@ if [ -n "$APPROVE_PIN" ]; then
     node "$LIB/pins.mjs" approve "$CATALOG" "$APPROVE_PIN" "$APPROVED_LOCAL" || die "--approve-hermes-plugin $APPROVE_PIN was not recorded"
 fi
 pin_status=0
-PLUGIN_SHA=$(node "$LIB/pins.mjs" check "$CATALOG" "$HERE/approved-plugin-pins.txt" "$APPROVED_LOCAL") || pin_status=$?
+PLUGIN_PIN=$(node "$LIB/pins.mjs" check "$CATALOG" "$HERE/approved-plugin-pins.txt" "$APPROVED_LOCAL") || pin_status=$?
 [ "$pin_status" = 0 ] || exit "$pin_status"
+PLUGIN_SHA=${PLUGIN_PIN%% *} PLUGIN_REPO=${PLUGIN_PIN#* }
 
 # ─── JClaw ──────────────────────────────────────────────────────────────────
 log "Installing JClaw $JCLAW_TAG"
@@ -212,7 +213,8 @@ hermes_cmd() { "$HERMES_DIR/scripts/run-in-hermes-env" bash -c 'exec "${PYTHON:-
     export HERMES_HOME=$HERMES_HOME_DIR TERMINAL_CWD=$RUN_DIR/hermes-cwd
     unset OLLAMA_BASE_URL
     cd "$RUN_DIR/hermes-cwd"
-    hermes_cmd plugins install web-ollama-cloud --ref "$PLUGIN_SHA" --enable --yes-deps
+    # From the checked repository and commit, not through Hermes's own read of its catalog.
+    hermes_cmd plugins install "$PLUGIN_REPO" --ref "$PLUGIN_SHA" --enable --yes-deps
 ) >"$RUN_DIR/logs/hermes-setup.log" 2>&1 || die "Hermes's setup or plugin install failed: $RUN_DIR/logs/hermes-setup.log"
 (
     export HERMES_HOME=$HERMES_HOME_DIR TERMINAL_CWD=$RUN_DIR/hermes-cwd OLLAMA_API_KEY=$OLLAMA_KEY

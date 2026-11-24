@@ -18,6 +18,13 @@ test('reads the commit and repository from a catalog entry, quoted or not', () =
   assert.deepEqual(readCatalog('name: x\n'), { commit: '', repo: '' })
 })
 
+test('reads no commit from an entry with a second or a nested sha, and no repository from one with a second repo', () => {
+  assert.equal(readCatalog(catalog(SHA) + `sha: ${'a'.repeat(40)}\n`).commit, '')
+  assert.equal(readCatalog(`repo: ${REPO}\nsource:\n  sha: ${SHA}\n`).commit, '')
+  assert.equal(readCatalog(catalog(SHA) + 'repo: https://github.com/someone/fork\n').repo, '')
+  assert.equal(readCatalog(catalog(SHA) + `sha  : ${SHA}\n`).commit, '')
+})
+
 test('approves only the exact reviewed pair', () => {
   const cases = [
     ['the reviewed commit and repository', SHA, REPO, true],
@@ -49,7 +56,7 @@ test('the command refuses an unapproved pin with exit 3 and records an approval 
   assert.equal(run('approve', cat, SHA, local).code, 2)
   assert.equal(fs.existsSync(local), false)
   assert.equal(run('approve', cat, next, local).code, 0)
-  assert.deepEqual(run('check', cat, tracked, local), { code: 0, out: next })
+  assert.deepEqual(run('check', cat, tracked, local), { code: 0, out: `${next} ${REPO}` })
   fs.writeFileSync(cat, catalog(''))
   assert.equal(run('check', cat, tracked, local).code, 2)
 })
