@@ -304,6 +304,102 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
+     * JF-561: outside the home folder nothing above the workspace gets its metadata from the hidden home, so the
+     * workspaces folder gets it back after its reopen, and {@code mkdir -p} in the workspace can stat it.
+     */
+    @Test
+    void macProfileForACustomAgentOutsideTheHomeFolderGivesTheWorkspacesFolderItsMetadataBack() {
+        var profile = HarnessSandbox.macosProfile(new File("/srv/jc/workspace/a"), List.of(), "/h/u",
+                List.of(Path.of("/srv/jc/data"), Path.of("/srv/jc/workspace"), Path.of("/srv/jc/skills")), false,
+                List.of());
+        assertEquals("""
+                (version 1)
+                (allow default)
+                (deny file-write* (subpath "/"))
+                (allow file-write* (subpath "/srv/jc/workspace/a"))
+                (allow file-write* (subpath "/private/tmp"))
+                (allow file-write* (subpath "/private/var/folders"))
+                (allow file-write* (subpath "/dev"))
+                (deny file-read* (subpath "/h/u"))
+                (allow file-read* (subpath "/srv/jc/workspace/a"))
+                (allow file-read-metadata (literal "/h/u"))
+                (deny file-read* file-write* (subpath "/srv/jc/data"))
+                (deny file-read* file-write* (subpath "/srv/jc/workspace"))
+                (deny file-read* file-write* (subpath "/srv/jc/skills"))
+                (allow file-read* file-write* (subpath "/srv/jc/workspace/a"))
+                (allow file-read-metadata (literal "/srv/jc/workspace"))
+                (deny file-read* (subpath "/h/u/.ssh"))
+                (deny file-read* (subpath "/h/u/.aws"))
+                (deny file-read* (subpath "/h/u/.gnupg"))
+                (deny file-read* (subpath "/h/u/.config/gcloud"))
+                (deny file-read* (subpath "/h/u/.kube"))
+                (deny file-read* (subpath "/h/u/.netrc"))
+                """, profile);
+    }
+
+    /** JF-561: every folder from the hidden root down to a workspace below it gets its metadata, top first. */
+    @Test
+    void macProfileGivesBackTheMetadataOfEachFolderBetweenTheHiddenRootAndTheWorkspace() {
+        var profile = HarnessSandbox.macosProfile(new File("/srv/jc/workspace/team/a"), List.of(), "/h/u",
+                List.of(Path.of("/srv/jc/workspace")), false, List.of());
+        assertEquals("""
+                (version 1)
+                (allow default)
+                (deny file-write* (subpath "/"))
+                (allow file-write* (subpath "/srv/jc/workspace/team/a"))
+                (allow file-write* (subpath "/private/tmp"))
+                (allow file-write* (subpath "/private/var/folders"))
+                (allow file-write* (subpath "/dev"))
+                (deny file-read* (subpath "/h/u"))
+                (allow file-read* (subpath "/srv/jc/workspace/team/a"))
+                (allow file-read-metadata (literal "/h/u"))
+                (deny file-read* file-write* (subpath "/srv/jc/workspace"))
+                (allow file-read* file-write* (subpath "/srv/jc/workspace/team/a"))
+                (allow file-read-metadata (literal "/srv/jc/workspace"))
+                (allow file-read-metadata (literal "/srv/jc/workspace/team"))
+                (deny file-read* (subpath "/h/u/.ssh"))
+                (deny file-read* (subpath "/h/u/.aws"))
+                (deny file-read* (subpath "/h/u/.gnupg"))
+                (deny file-read* (subpath "/h/u/.config/gcloud"))
+                (deny file-read* (subpath "/h/u/.kube"))
+                (deny file-read* (subpath "/h/u/.netrc"))
+                """, profile);
+    }
+
+    /**
+     * JF-561: under the home folder the hidden home already gives the workspaces folder its metadata, so the profile is
+     * what it was, with no second line for it.
+     */
+    @Test
+    void macProfileForACustomAgentUnderTheHomeFolderGivesTheWorkspacesFolderItsMetadataOnce() {
+        var profile = HarnessSandbox.macosProfile(new File("/h/u/jc/workspace/a"), List.of(), "/h/u",
+                List.of(Path.of("/h/u/jc/data"), Path.of("/h/u/jc/workspace")), false, List.of());
+        assertEquals("""
+                (version 1)
+                (allow default)
+                (deny file-write* (subpath "/"))
+                (allow file-write* (subpath "/h/u/jc/workspace/a"))
+                (allow file-write* (subpath "/private/tmp"))
+                (allow file-write* (subpath "/private/var/folders"))
+                (allow file-write* (subpath "/dev"))
+                (deny file-read* (subpath "/h/u"))
+                (allow file-read* (subpath "/h/u/jc/workspace/a"))
+                (allow file-read-metadata (literal "/h/u"))
+                (allow file-read-metadata (literal "/h/u/jc"))
+                (allow file-read-metadata (literal "/h/u/jc/workspace"))
+                (deny file-read* file-write* (subpath "/h/u/jc/data"))
+                (deny file-read* file-write* (subpath "/h/u/jc/workspace"))
+                (allow file-read* file-write* (subpath "/h/u/jc/workspace/a"))
+                (deny file-read* (subpath "/h/u/.ssh"))
+                (deny file-read* (subpath "/h/u/.aws"))
+                (deny file-read* (subpath "/h/u/.gnupg"))
+                (deny file-read* (subpath "/h/u/.config/gcloud"))
+                (deny file-read* (subpath "/h/u/.kube"))
+                (deny file-read* (subpath "/h/u/.netrc"))
+                """, profile);
+    }
+
+    /**
      * JF-391: a custom agent's wrap hides every workspace and the shared skills folder after its write grants, then
      * reopens its own workspace, so an install outside the home folder shows it nothing of another agent's.
      */
@@ -456,7 +552,9 @@ class HarnessSandboxTest extends UnitTest {
 
     /**
      * JF-391, measured: with JClaw outside the home folder, a custom agent can neither read nor write another agent's
-     * workspace or the skills folder, while its own workspace stays readable, writable and resolvable by path.
+     * workspace or the skills folder, while its own workspace stays readable, writable and resolvable by path. JF-561:
+     * it can also {@code stat} the workspaces folder, which BSD {@code mkdir -p} does for every existing component of
+     * an absolute path, but not another agent's workspace.
      */
     @Test
     @EnabledOnOs(OS.MAC)
@@ -480,6 +578,9 @@ class HarnessSandboxTest extends UnitTest {
                     "cat '%s' 2>/dev/null || echo NO-READ-SKILLS".formatted(skill.resolve("SKILL.md")),
                     "touch '%s' 2>/dev/null || echo NO-WRITE-OTHER".formatted(other.resolve("written")),
                     "touch '%s' 2>/dev/null || echo NO-WRITE-SKILLS".formatted(skill.resolve("written")),
+                    "stat -f %%HT '%s' 2>/dev/null || echo NO-STAT-OTHER".formatted(other),
+                    "stat -f %%HT '%s' 2>/dev/null || echo NO-STAT-WORKSPACES".formatted(base.resolve("workspace")),
+                    "mkdir -p '%s' && echo MKDIR-P-OWN".formatted(own.resolve(".cache/uv")),
                     "cat mine.txt",
                     "touch own.txt && echo WROTE-OWN",
                     "[ \"$(pwd -P)\" = '%s' ] && echo PWD-RESOLVES".formatted(own),
@@ -494,6 +595,9 @@ class HarnessSandboxTest extends UnitTest {
                     NO-READ-SKILLS
                     NO-WRITE-OTHER
                     NO-WRITE-SKILLS
+                    NO-STAT-OTHER
+                    Directory
+                    MKDIR-P-OWN
                     mine
                     WROTE-OWN
                     PWD-RESOLVES
@@ -1174,7 +1278,7 @@ class HarnessSandboxTest extends UnitTest {
     }
 
     /**
-     * Seatbelt's last matching rule wins: the hidden roots are denied after every write grant,
+     * Among Seatbelt's wildcard rules the last match wins: the hidden roots are denied after every write grant,
      * a grant beneath one is reopened after that, an ancestor grant is not, and the $HOME
      * secrets come last so a reopen cannot reach them. Pinned on every host.
      */
@@ -1490,6 +1594,79 @@ class HarnessSandboxTest extends UnitTest {
                 (deny signal (require-not (target same-sandbox)))
                 """, HarnessSandbox.scriptMacosProfile(Path.of("/h/u/jc/data/scripts/run-1"), Path.of("/opt/node/24.22.1"),
                 "/h/u", hidden));
+    }
+
+    /**
+     * JF-561: outside the home folder a scratch folder and an interpreter folder beneath data/ each give the folders
+     * between data/ and them their metadata back after their reopen, data/ itself once.
+     */
+    @Test
+    void scriptMacosProfileOutsideTheHomeFolderGivesBackTheMetadataAboveItsFolders() {
+        var hidden = List.of(Path.of("/srv/jc/data"), Path.of("/srv/jc/certs"));
+        assertEquals("""
+                (version 1)
+                (allow default)
+                (deny network*)
+                (deny file-write* (subpath "/"))
+                (allow file-write* (subpath "/srv/jc/data/scripts/run-1"))
+                (deny file-read* (subpath "/h/u"))
+                (allow file-read* (subpath "/srv/jc/data/scripts/run-1"))
+                (allow file-read* (subpath "/srv/jc/data/playwright-node/24"))
+                (allow file-read-metadata (literal "/h/u"))
+                (deny file-read* file-write* (subpath "/srv/jc/data"))
+                (deny file-read* file-write* (subpath "/srv/jc/certs"))
+                (allow file-read* file-write* (subpath "/srv/jc/data/scripts/run-1"))
+                (allow file-read-metadata (literal "/srv/jc/data"))
+                (allow file-read-metadata (literal "/srv/jc/data/scripts"))
+                (allow file-read* (subpath "/srv/jc/data/playwright-node/24"))
+                (allow file-read-metadata (literal "/srv/jc/data/playwright-node"))
+                (deny file-read* (subpath "/h/u/.ssh"))
+                (deny file-read* (subpath "/h/u/.aws"))
+                (deny file-read* (subpath "/h/u/.gnupg"))
+                (deny file-read* (subpath "/h/u/.config/gcloud"))
+                (deny file-read* (subpath "/h/u/.kube"))
+                (deny file-read* (subpath "/h/u/.netrc"))
+                (deny lsopen)
+                (deny signal (require-not (target same-sandbox)))
+                """, HarnessSandbox.scriptMacosProfile(Path.of("/srv/jc/data/scripts/run-1"),
+                Path.of("/srv/jc/data/playwright-node/24"), "/h/u", hidden));
+    }
+
+    /**
+     * JF-561, measured: outside the home folder a script whose scratch folder lies beneath a hidden folder can make
+     * folders in it with {@code mkdir -p}, which stats the hidden folder, while that folder stays unlistable and its
+     * files unreadable.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void macAScriptsScratchFolderBeneathAHiddenFolderOutsideTheHomeFolderCanMakeFolders() throws Exception {
+        var base = SandboxHiddenRoots.canonical(Files.createTempDirectory("jf561-script-"));
+        try {
+            var data = base.resolve("data");
+            var scratch = Files.createDirectories(data.resolve("scripts/run-1"));
+            var interpreter = Files.createDirectories(base.resolve("runtime"));
+            Files.writeString(data.resolve("secret.txt"), "secret\n");
+            var profile = HarnessSandbox.scriptMacosProfile(scratch, interpreter, System.getProperty("user.home"),
+                    List.of(data));
+            // A script writes only its scratch folder, /dev/null included, so stderr goes to a file there.
+            var script = String.join("\n",
+                    "mkdir -p '%s' && echo MKDIR-P-SCRATCH".formatted(scratch.resolve("a/b")),
+                    "stat -f %%HT '%s' 2>err || echo NO-STAT-DATA".formatted(data),
+                    "ls '%s' >err 2>&1 || echo NO-LIST-DATA".formatted(data),
+                    "cat '%s' 2>err || echo NO-READ-SECRET".formatted(data.resolve("secret.txt")));
+            var proc = new ProcessBuilder("sandbox-exec", "-p", profile, "/bin/sh", "-c", script)
+                    .directory(scratch.toFile()).redirectErrorStream(true).start();
+            var out = new String(proc.getInputStream().readAllBytes());
+            assertTrue(proc.waitFor(30, java.util.concurrent.TimeUnit.SECONDS), "the run finished");
+            assertEquals("""
+                    MKDIR-P-SCRATCH
+                    Directory
+                    NO-LIST-DATA
+                    NO-READ-SECRET
+                    """, out);
+        } finally {
+            deleteTree(base);
+        }
     }
 
     /**

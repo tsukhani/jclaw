@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -590,24 +591,32 @@ public final class HarnessSandbox {
     }
 
     /**
-     * A script's Seatbelt profile, public so a test can pin its text on any host. The last matching rule wins:
-     * the network and every write go, {@code scratch} gets its writes back, {@code $HOME} is hidden but for
-     * {@code scratch} and {@code interpreter}, JClaw's hidden folders go after that, either folder lying beneath
-     * one is reopened, {@code interpreter} for reading only, and the secret folders of {@code $HOME} come last.
+     * A script's Seatbelt profile, public so a test can pin its text on any host. Rules take effect as
+     * {@link #macosProfile(File, List, String, List, boolean, List)} says: the network and every write go,
+     * {@code scratch} gets its writes back, {@code $HOME} is hidden but for {@code scratch} and
+     * {@code interpreter}, JClaw's hidden folders go after that, either folder lying beneath one is reopened,
+     * {@code interpreter} for reading only, with the metadata of the folders above it, and the secret folders of
+     * {@code $HOME} come last.
      * A custom agent's socket and JVM attach rules are left out: {@code (deny network*)} refuses every socket, and
      * the run writes to no shared temp folder from which one could be moved.
      */
     public static String scriptMacosProfile(Path scratch, Path interpreter, String home, List<Path> hidden) {
         var sb = new StringBuilder("(version 1)\n(allow default)\n(deny network*)\n(deny file-write* (subpath \"/\"))\n");
         sb.append(writeAllow(scratch.toString()));
-        appendHiddenHome(sb, scratch.toString(), home, List.of(interpreter.toString()));
+        var metadata = appendHiddenHome(sb, scratch.toString(), home, List.of(interpreter.toString()));
         for (var root : hidden) {
             sb.append(rule("deny", "file-read* file-write*", root.toString()));
         }
         var scratchBeneath = SandboxHiddenRoots.beneath(scratch.toString(), hidden);
-        if (scratchBeneath != null) sb.append(rule("allow", "file-read* file-write*", scratchBeneath.toString()));
+        if (scratchBeneath != null) {
+            sb.append(rule("allow", "file-read* file-write*", scratchBeneath.toString()));
+            appendHiddenAncestorsMetadata(sb, scratchBeneath, hidden, metadata);
+        }
         var interpreterBeneath = SandboxHiddenRoots.beneath(interpreter.toString(), hidden);
-        if (interpreterBeneath != null) sb.append(rule("allow", "file-read*", interpreterBeneath.toString()));
+        if (interpreterBeneath != null) {
+            sb.append(rule("allow", "file-read*", interpreterBeneath.toString()));
+            appendHiddenAncestorsMetadata(sb, interpreterBeneath, hidden, metadata);
+        }
         for (var s : DENY_READ_HOME) {
             sb.append(rule("deny", "file-read*", absHome(home, s)));
         }
@@ -630,9 +639,10 @@ public final class HarnessSandbox {
     }
 
     /**
-     * The Main Agent's Seatbelt profile, public so a test can pin its text. The last matching rule wins: the program
-     * files lose their writes, the workspaces get them back, the secret folders lose everything after that, and a
-     * readable folder inside one gets its reads back.
+     * The Main Agent's Seatbelt profile, public so a test can pin its text. Rules take effect as
+     * {@link #macosProfile(File, List, String, List, boolean, List)} says: the program files lose their writes, the
+     * workspaces get them back, the secret folders lose everything after that, and a readable folder inside one gets
+     * its reads back.
      *
      * <p>macOS runs no setuid program inside a sandbox (measured: {@code ps}, {@code top}, {@code sudo},
      * {@code crontab}, {@code su} and {@code traceroute} all fail with EPERM under a bare {@code (allow default)}), so
@@ -994,16 +1004,19 @@ public final class HarnessSandbox {
     }
 
     /**
-     * The Seatbelt profile, public so a test can pin its rule order on any host. The last
-     * matching rule wins, so each {@code hidden} root is denied after every write grant (hiding
-     * it even inside a grant above it), a grant beneath one is reopened after that, and the
-     * {@code $HOME} secrets come last so no reopen can reach them.
+     * The Seatbelt profile, public so a test can pin its rule order on any host. Among rules that name
+     * operations by wildcard ({@code file-read*}, {@code file-write*}) the last that matches wins, but a
+     * rule naming one operation, such as {@code file-read-metadata} or {@code file-read-data}, outranks a
+     * {@code file-read*} rule whatever their order (measured, JF-561). So each {@code hidden} root is
+     * denied after every write grant (hiding it even inside a grant above it), a grant beneath one is
+     * reopened after that, and the {@code $HOME} secrets come last so no reopen can reach them.
      *
      * @param homeReads null keeps {@code $HOME} readable. Otherwise {@code $HOME} is denied for reading
      *                  after the write grants, then the write root and these directories are reopened, and
-     *                  {@code $HOME} and each directory between it and a reopen get their metadata back so
-     *                  {@code getcwd} and {@code realpath} resolve; only the write root is reopened beneath a
-     *                  hidden root.
+     *                  {@code $HOME} and each directory between it and a reopen get their metadata back, so
+     *                  a {@code stat} of them works, which BSD {@code mkdir -p} needs; only the write root is
+     *                  reopened beneath a hidden root, with the metadata of the folders from that root down to
+     *                  it.
      */
     public static String macosProfile(File writeRoot, List<String> allowances, String home, List<Path> hidden,
                                       boolean denyNetwork, @Nullable List<String> homeReads) {
@@ -1022,13 +1035,15 @@ public final class HarnessSandbox {
             sb.append(writeAllow(abs));
             grants.add(abs);
         }
-        if (homeReads != null) appendHiddenHome(sb, writeRoot.getAbsolutePath(), home, homeReads);
+        var metadata = homeReads == null ? null : appendHiddenHome(sb, writeRoot.getAbsolutePath(), home, homeReads);
         for (var root : hidden) {
             sb.append(rule("deny", "file-read* file-write*", root.toString()));
         }
-        for (var g : homeReads == null ? grants : List.of(writeRoot.getAbsolutePath())) {
+        for (var g : metadata == null ? grants : List.of(writeRoot.getAbsolutePath())) {
             var reopened = SandboxHiddenRoots.beneath(g, hidden);
-            if (reopened != null) sb.append(rule("allow", "file-read* file-write*", reopened.toString()));
+            if (reopened == null) continue;
+            sb.append(rule("allow", "file-read* file-write*", reopened.toString()));
+            if (metadata != null) appendHiddenAncestorsMetadata(sb, reopened, hidden, metadata);
         }
         for (var s : DENY_READ_HOME) {
             sb.append(rule("deny", "file-read*", absHome(home, s)));
@@ -1132,7 +1147,8 @@ public final class HarnessSandbox {
                 .toString();
     }
 
-    private static void appendHiddenHome(StringBuilder sb, String workspace, String home, List<String> homeReads) {
+    /** Hides {@code $HOME} but for {@code workspace} and {@code homeReads}; returns the folders given their metadata. */
+    private static Set<String> appendHiddenHome(StringBuilder sb, String workspace, String home, List<String> homeReads) {
         var homePath = SandboxHiddenRoots.lexical(home);
         if (homePath == null) throw new SandboxUnavailableException("sandbox: the home folder is not a valid path: " + home);
         sb.append(rule("deny", "file-read*", homePath.toString()));
@@ -1155,8 +1171,34 @@ public final class HarnessSandbox {
             metadata.addAll(between);
         }
         for (var dir : metadata) {
-            sb.append("(allow file-read-metadata (literal \"").append(escapeSeatbelt(dir)).append("\"))\n");
+            sb.append(metadataAllow(dir));
         }
+        return metadata;
+    }
+
+    /**
+     * Gives back the metadata of each hidden root {@code reopened} lies beneath and of each folder between that root
+     * and it, top first, except those in {@code given}, which it adds to. BSD {@code mkdir -p} {@code stat}s every
+     * existing component of an absolute path, so without these a run cannot make a folder inside its own reopened
+     * folder once that lies outside {@code $HOME}, where {@link #appendHiddenHome} gives nothing back (JF-561). A
+     * metadata rule outranks the hidden root's {@code file-read*} deny whatever their order, and lists nothing.
+     */
+    private static void appendHiddenAncestorsMetadata(StringBuilder sb, Path reopened, List<Path> hidden,
+                                                      Set<String> given) {
+        for (var root : hidden) {
+            if (!reopened.startsWith(root) || reopened.equals(root)) continue;
+            var dirs = new ArrayList<String>();
+            for (var dir = reopened.getParent(); dir != null && dir.startsWith(root); dir = dir.getParent()) {
+                dirs.addFirst(dir.toString());
+            }
+            for (var dir : dirs) {
+                if (given.add(dir)) sb.append(metadataAllow(dir));
+            }
+        }
+    }
+
+    private static String metadataAllow(String dir) {
+        return "(allow file-read-metadata (literal \"" + escapeSeatbelt(dir) + "\"))\n";
     }
 
     /**

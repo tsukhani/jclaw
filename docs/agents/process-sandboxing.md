@@ -51,13 +51,21 @@ chain the walk gives up on, runs through `HarnessSandbox.wrapCustomAgentShell` w
 says, writing only to `AgentService.workspacePath(agent.name)` (a copy writes its root's workspace),
 with the confined package caches. On Linux that is the same `linuxArgv`, which already hides
 `$HOME`, with `--unshare-user` whoever runs it and runtime folders of its own (both below). On macOS
-the profile also hides the home folder, in this order, last match winning:
+the profile also hides the home folder, in this order:
 today's lines through the write grants; `(deny file-read* (subpath "<home>"))`; the workspace
 reopened for reading; each PATH reopen; `(allow file-read-metadata (literal …))` for `<home>` and
-every directory between it and a reopen, so `getcwd` and `realpath` resolve (an inference about
-Seatbelt, to be confirmed on macOS); then the hidden-root denies, the reopen beneath a hidden root
-for the write root only, and the `DENY_READ_HOME` denies. A PATH reopen above `data/`, `certs/` or
-`~/.ssh` therefore never reopens them. `HarnessSandbox.homeReadReopens` picks the reopens from
+every directory between it and a reopen, so a `stat` of them works; then the hidden-root denies, the
+reopen beneath a hidden root for the write root only, followed by the metadata of each folder from
+that root down to it, and the `DENY_READ_HOME` denies. BSD `mkdir -p` `stat`s every existing
+component of an absolute path, so without those metadata grants it fails in the run's own workspace
+("Operation not permitted"), while `getcwd`, `pwd -P` and `realpath` resolve either way. Under the
+home folder the first set already covers the workspaces folder; outside it only the second does
+(JF-561). Seatbelt's precedence, measured: among rules that name operations by wildcard (`file-read*`,
+`file-write*`) the last that matches wins, so a PATH reopen above `data/`, `certs/` or `~/.ssh` never
+reopens them; but a rule naming one operation outranks a `file-read*` rule whatever their order. An
+earlier `(allow file-read-metadata (literal X))` survives a later `(deny file-read* (subpath X))`, and
+gives back `stat` but not a listing; an earlier `(allow file-read-data (literal X/f))` reads `X/f`
+through it; an earlier `(allow file-read* (literal X/f))` does not. `HarnessSandbox.homeReadReopens` picks the reopens from
 JClaw's own `PATH` (`SubprocessEnv.filteredHostEnv()`), never from a `PATH` the model passes in
 `exec`'s `env`: an entry qualifies when it is absolute and strictly below `<home>` on a segment
 boundary, plus its canonical path when that differs and is also below `<home>`.
