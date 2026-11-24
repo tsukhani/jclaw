@@ -56,6 +56,7 @@ export function compareMemory(prev, cur) {
 }
 
 const mib = kb => (kb == null ? '–' : Math.round(kb / 1024).toLocaleString('en-US'))
+const nodeMajorOf = v => (v?.node ? Number(String(v.node).split('.')[0]) : null)
 
 function e2eNote(S, task) {
   const j = S[`${task}|jclaw`]
@@ -72,7 +73,11 @@ export function render({ analysis, conformance, versions, turns, history, host }
   const model = meta.model ?? config.model
   const out = []
   const p = (s = '') => out.push(s)
-  const same = history.filter(e => e.host === host && e.model === model)
+  // Node.js runs OpenClaw and the proxy and driver that time all three, so a new major version starts a new series.
+  const nodeMajor = nodeMajorOf(versions)
+  const hostAndModel = history.filter(e => e.host === host && e.model === model)
+  const same = hostAndModel.filter(e => nodeMajorOf(e.versions) === nodeMajor)
+  const otherNode = [...new Set(hostAndModel.map(e => nodeMajorOf(e.versions)).filter(m => m !== nodeMajor))]
   const prev = same.at(-1)
   const first = same[0]
   p(`# JClaw against OpenClaw and Hermes: ${meta.at.slice(0, 10)} on ${host}`)
@@ -122,11 +127,14 @@ export function render({ analysis, conformance, versions, turns, history, host }
 
     p('## Changes since earlier runs')
     p()
-    if (!prev) p(`This is the first run on ${host} with \`${model}\`, so it is the baseline for later runs.`)
-    if (!prev) p()
+    const onNode = nodeMajor == null ? '' : ` on Node.js ${nodeMajor}`
+    if (!prev) p(`This is the first run on ${host} with \`${model}\`${onNode}, so it is the baseline for later runs.`)
+    if (otherNode.length) p(`Runs on Node.js ${otherNode.map(m => m ?? 'unrecorded').join(' and ')} stay in the history but are not compared with this one.`)
+    if (!prev || otherNode.length) p()
     for (const [label, base] of [['the previous run', prev], ['the first run', first !== prev ? first : null]]) {
       if (!base) continue
       const vs = HARNESSES.filter(h => base.versions?.[h]?.tag !== versions[h]?.tag).map(h => `${N[h]} ${base.versions?.[h]?.tag ?? '?'} → ${versions[h]?.tag}`)
+      if (base.versions?.node !== versions.node) vs.push(`Node.js ${base.versions?.node ?? '?'} → ${versions.node ?? '?'}`)
       const marked = compare(base.summary, S)
       p(`**Against ${label}** (${base.at.slice(0, 16).replace('T', ' ')} UTC): ${vs.length ? `versions changed: ${vs.join(', ')}` : 'no version changed'}.`)
       p()

@@ -154,6 +154,20 @@ test('the versions table names the Node.js the run used, and leaves the row out 
   assert.equal(reportOf([meta()]).text.includes('| Node.js'), false)
 })
 
+test('a run on a new Node.js major starts a new baseline, and a patch release within one is named as a change', () => {
+  const { analysis } = reportOf([meta(), ...samples])
+  const run = (node) => ({ at: '2026-11-24T15:02:14.405Z', host: 'testhost', model: 'm', summary: analysis.summary,
+    versions: { ...Object.fromEntries(H.map(h => [h, { tag: 'v1' }])), node } })
+  const changes = (text) => text.slice(text.indexOf('## Changes'), text.indexOf('## Per-task')).split('\n').filter(Boolean)
+  assert.deepEqual(changes(reportOf([meta(), ...samples], [run('24.22.3')], '26.13.1').text), [
+    '## Changes since earlier runs',
+    'This is the first run on testhost with `m` on Node.js 26, so it is the baseline for later runs.',
+    'Runs on Node.js 24 stay in the history but are not compared with this one.',
+  ])
+  assert.equal(changes(reportOf([meta(), ...samples], [run('26.12.0')], '26.13.1').text)[1],
+    '**Against the previous run** (2026-11-24 15:02 UTC): versions changed: Node.js 26.12.0 → 26.13.1.')
+})
+
 test('the report lists a marked memory change against the previous run, and says when there is none', () => {
   const { analysis } = reportOf([meta(), ...samples])
   const base = (medianKb) => [{ at: '2026-11-24T00:00:00.000Z', host: 'testhost', model: 'm', versions: { jclaw: { tag: 'v0' }, openclaw: { tag: 'v1' }, hermes: { tag: 'v1' } }, summary: analysis.summary,
