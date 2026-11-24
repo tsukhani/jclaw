@@ -140,9 +140,19 @@ function mathExtension(name: string, level: 'block' | 'inline', rules: RegExp[],
   }
 }
 
+// Marked hands a block start the text after its first character, so `^` there would also match mid-line.
+const DISPLAY_OPENER_LINE = /\n(?=\$\$|\\\[)/
+const DISPLAY_OPENER = /(?:^|\n)(?:\$\$|\\\[)/
+
 const chatMarked = new Marked({ breaks: true, gfm: true }, {
   extensions: [
-    mathExtension('mathBlock', 'block', [/^\$\$([\s\S]+?)\$\$[ \t]*(?:\n+|$)/], /^\$\$/m),
+    // \[…\] needs this block rule too: a formula's line of only = or - is a setext underline, so the block pass
+    // would split it into headings before the inline rule saw both delimiters. It stops at the first \] to keep
+    // a \[…\] followed by text in its paragraph rather than running on to a later block.
+    mathExtension('mathBlock', 'block', [
+      /^\$\$([\s\S]+?)\$\$[ \t]*(?:\n+|$)/,
+      /^\\\[((?:(?!\\\])[\s\S])+)\\\][ \t]*(?:\n+|$)/,
+    ], DISPLAY_OPENER_LINE),
     mathExtension('mathInline', 'inline', [
       /^\$\$((?:\\.|[^\\$])+?)\$\$/,
       /^\$(?!\s)((?:\\.|[^\\\n$])+?)(?<!\s)\$(?!\d)/,
@@ -150,6 +160,15 @@ const chatMarked = new Marked({ breaks: true, gfm: true }, {
       /^\\\[([\s\S]+?)\\\]/,
     ], /\$|\\[([]/),
   ],
+  tokenizer: {
+    // Marked tries a setext heading on the whole text before it cuts a paragraph at a block start, so prose with a
+    // formula right under it would become a heading. undefined falls through to that cut paragraph; false would
+    // run the built-in heading tokenizer.
+    lheading(src) {
+      const heading = this.rules.block.lheading.exec(src)?.[0]
+      return heading && DISPLAY_OPENER.test(heading) ? undefined : false
+    },
+  },
 })
 
 /** A final call that wrote for less than this streamed in a packet or two, too few to time. */

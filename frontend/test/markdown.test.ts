@@ -1,6 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import { renderMarkdown } from '~/utils/chat-markdown'
 
+// KaTeX keeps its input in the MathML annotation, so a formula reads back as the TeX it was given.
+const tex = (math: Element) => math.querySelector('annotation')?.textContent ?? ''
+
+/** Each top-level block of the rendered HTML: display math as its TeX, anything else as its tag and text. */
+function blocks(html: string): string[] {
+  const root = document.createElement('div')
+  root.innerHTML = html
+  return [...root.children].map((block) => {
+    if (block.classList.contains('katex-display')) return `math: ${tex(block)}`
+    for (const math of block.querySelectorAll('.katex')) math.replaceWith(`⟨${tex(math)}⟩`)
+    return `${block.tagName.toLowerCase()}: ${block.textContent}`
+  })
+}
+
 describe('renderMarkdown', () => {
   it('returns empty string for empty input', () => {
     expect(renderMarkdown('')).toBe('')
@@ -108,6 +122,44 @@ describe('renderMarkdown', () => {
 
   it('typesets a $$ block on its own lines', () => {
     expect(renderMarkdown('Let\n\n$$\nP = p_1 p_2\n$$\n\nthen')).toContain('katex-display')
+  })
+
+  // A line of only = or - under text is a setext heading underline, which split this reply's equations into headings.
+  it('typesets a \\[ block whose lines hold only =, + or -', () => {
+    const reply = 'A minimal model is:\n\n\\[\nH_{t+1}\n=\n(1-\\delta_H)H_t\n+\n\\alpha P_t\n-\n\\eta C_t\n\\]\n\nHere:'
+    expect(blocks(renderMarkdown(reply))).toEqual([
+      'p: A minimal model is:',
+      'math: H_{t+1}\n=\n(1-\\delta_H)H_t\n+\n\\alpha P_t\n-\n\\eta C_t',
+      'p: Here:',
+    ])
+  })
+
+  it('typesets a $$ block whose lines hold only = or -', () => {
+    expect(blocks(renderMarkdown('$$\nS_{t+1}\n=\nS_t\n-\n\\lambda H_t\n$$'))).toEqual([
+      'math: S_{t+1}\n=\nS_t\n-\n\\lambda H_t',
+    ])
+  })
+
+  it('keeps a \\[ or $$ block that holds a blank line as one formula', () => {
+    expect(blocks(renderMarkdown('\\[\na = b\n\nc = d\n\\]'))).toEqual(['math: a = b\n\nc = d'])
+    expect(blocks(renderMarkdown('$$\na = b\n\nc = d\n$$'))).toEqual(['math: a = b\n\nc = d'])
+  })
+
+  it('ends a paragraph at a \\[ or $$ line, so the formula below it is not read as a heading', () => {
+    expect(blocks(renderMarkdown('The update is\n\\[\nx\n=\ny\n\\]'))).toEqual(['p: The update is', 'math: x\n=\ny'])
+    expect(blocks(renderMarkdown('The update is\n$$\nx\n=\ny\n$$'))).toEqual(['p: The update is', 'math: x\n=\ny'])
+  })
+
+  it('still reads a heading underline when no formula opens above it', () => {
+    expect(blocks(renderMarkdown('Results for $x$\n=\n\n\\[\ny\n\\]'))).toEqual(['h1: Results for ⟨x⟩', 'math: y'])
+  })
+
+  it('typesets \\[…\\] inside a paragraph where it stands', () => {
+    expect(blocks(renderMarkdown('so \\[x^2\\] holds here'))).toEqual(['p: so ⟨x^2⟩ holds here'])
+  })
+
+  it('leaves a \\[ whose closing \\] has text after it to its paragraph, and typesets the next block apart', () => {
+    expect(blocks(renderMarkdown('\\[a\\] and b\n\n\\[\nc\n\\]'))).toEqual(['p: ⟨a⟩ and b', 'math: c'])
   })
 
   it('leaves dollar amounts in prose alone', () => {
