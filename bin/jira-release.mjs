@@ -119,20 +119,44 @@ async function moveToDone(call, key) {
 }
 
 /**
- * Closes a ticket whose work was done with no commit to name it (a spike, a verification task): the reason goes on it
- * as a comment first, since a transition drops the comment it is given, then it moves to Done. Its sprint, points and
- * Fix Version stay, since that work was delivered. The caller has checked git.
+ * Whether an epic's Epic Status is still not done, false for any other issue type. Jira keeps that field apart from
+ * the workflow status, and the backlog's Epics panel lists every epic it leaves open, so Done alone keeps an epic there.
+ */
+async function epicLeftOpen(call, key, fields) {
+  if (fields.issuetype?.name !== "Epic") return { open: false };
+  const epic = await call("GET", `/rest/agile/1.0/epic/${key}`);
+  if (epic.status !== 200) return { error: `Jira answered ${epic.status} for the epic ${key}` };
+  return { open: epic.json().done !== true };
+}
+
+/**
+ * Closes a ticket whose work was done with no commit to name it (a spike, a verification task, an epic whose stories
+ * shipped): the reason goes on it as a comment first, since a transition drops the comment it is given, then it moves
+ * to Done, and an epic's Epic Status is marked done. Its sprint, points and Fix Version stay, since that work was
+ * delivered. An epic already Done gets only the mark, which repairs one closed before close set it. The caller has
+ * checked git.
  */
 async function close(call, [key, reason]) {
-  const issue = await call("GET", `/rest/api/2/issue/${key}?fields=status`);
+  const issue = await call("GET", `/rest/api/2/issue/${key}?fields=status,issuetype`);
   if (issue.status !== 200) return { code: 2, lines: [`Jira answered ${issue.status} for ${key}`] };
-  const status = issue.json().fields?.status?.name;
-  if (status === "Done") return { code: 0, lines: [`${key}: left as Done.`] };
-  const posted = await call("POST", `/rest/api/2/issue/${key}/comment`,
-    { body: `Closed without a release, since no commit names ${key}: ${reason}` });
-  if (posted.status !== 201) return { code: 2, lines: [`Jira answered ${posted.status} to posting the reason on ${key}`] };
-  const failed = await moveToDone(call, key);
-  return failed ? { code: 2, lines: [failed] } : { code: 0, lines: [`${key}: ${status} to Done, with the reason posted.`] };
+  const fields = issue.json().fields ?? {};
+  const epic = await epicLeftOpen(call, key, fields);
+  if (epic.error) return { code: 2, lines: [epic.error] };
+  const status = fields.status?.name;
+  if (status === "Done" && !epic.open) return { code: 0, lines: [`${key}: left as Done.`] };
+  let head = `${key}: already Done.`;
+  if (status !== "Done") {
+    const posted = await call("POST", `/rest/api/2/issue/${key}/comment`,
+      { body: `Closed without a release, since no commit names ${key}: ${reason}` });
+    if (posted.status !== 201) return { code: 2, lines: [`Jira answered ${posted.status} to posting the reason on ${key}`] };
+    const failed = await moveToDone(call, key);
+    if (failed) return { code: 2, lines: [failed] };
+    head = `${key}: ${status} to Done, with the reason posted.`;
+  }
+  if (!epic.open) return { code: 0, lines: [head] };
+  const marked = await call("POST", `/rest/agile/1.0/epic/${key}`, { done: true });
+  return marked.status === 200 ? { code: 0, lines: [`${head} Epic marked done.`] }
+    : { code: 2, lines: [head, `Jira answered ${marked.status} to marking the epic ${key} done`] };
 }
 
 const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -149,12 +173,8 @@ async function drop(call, [key, reason]) {
   const issue = await call("GET", `/rest/agile/1.0/issue/${key}?fields=status,issuetype,fixVersions,${POINTS},sprint`);
   if (issue.status !== 200) return { code: 2, lines: [`Jira answered ${issue.status} for ${key}`] };
   const fields = issue.json().fields ?? {};
-  let openEpic = false;
-  if (fields.issuetype?.name === "Epic") {
-    const epic = await call("GET", `/rest/agile/1.0/epic/${key}`);
-    if (epic.status !== 200) return { code: 2, lines: [`Jira answered ${epic.status} for the epic ${key}`] };
-    openEpic = epic.json().done !== true;
-  }
+  const epic = await epicLeftOpen(call, key, fields);
+  if (epic.error) return { code: 2, lines: [epic.error] };
   const sprint = fields.sprint?.name;
   const points = fields[POINTS];
   const versions = (fields.fixVersions ?? []).map((v) => v.name);
@@ -166,7 +186,7 @@ async function drop(call, [key, reason]) {
     versions.length > 0 && { done: `${fixVersion} ${versions.join(", ")} cleared`, ok: 204,
       doing: `clearing the ${fixVersion} of ${key}`,
       send: () => call("PUT", `/rest/api/2/issue/${key}`, { fields: { fixVersions: [] } }) },
-    openEpic && { done: "epic marked done", ok: 200, doing: `marking the epic ${key} done`,
+    epic.open && { done: "epic marked done", ok: 200, doing: `marking the epic ${key} done`,
       send: () => call("POST", `/rest/agile/1.0/epic/${key}`, { done: true }) },
   ].filter(Boolean);
   const status = fields.status?.name;

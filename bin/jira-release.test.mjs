@@ -249,10 +249,11 @@ test("close and drop refuse with exit 1, asking Jira nothing, when a commit on a
 });
 
 const toDo = [200, { fields: { status: { name: "To Do" } } }];
+const CLOSE_READ = "?fields=status,issuetype";
 
 test("close posts the reason and then moves a ticket no branch names to Done, and leaves one already Done", async () => {
   const jira = (method, url) => {
-    if (method === "GET" && url.endsWith("?fields=status")) {
+    if (method === "GET" && url.endsWith(CLOSE_READ)) {
       return url.includes("JF-432") ? [200, { fields: { status: { name: "Done" } } }] : toDo;
     }
     if (method === "GET") return [200, transitions];
@@ -274,7 +275,7 @@ test("close posts the reason and then moves a ticket no branch names to Done, an
       seen.length = 0;
       deepStrictEqual(await cli(["close", "JF-432", "A duplicate of JF-410."], config, repo),
         { code: 0, stderr: "", stdout: "JF-432: left as Done.\n" });
-      deepStrictEqual(seen.map((s) => `${s.method} ${s.url}`), ["GET /rest/api/2/issue/JF-432?fields=status"]);
+      deepStrictEqual(seen.map((s) => `${s.method} ${s.url}`), [`GET /rest/api/2/issue/JF-432${CLOSE_READ}`]);
     });
   });
 });
@@ -290,7 +291,7 @@ test("close stops with exit 2 when Jira refuses the reason or the move, or git c
   const jira = (method, url) => {
     if (url.endsWith("/comment")) return [201, {}];
     if (method === "POST") return [400];
-    return url.endsWith("?fields=status") ? toDo : [200, transitions];
+    return url.endsWith(CLOSE_READ) ? toDo : [200, transitions];
   };
   await withJira(jira, async ({ config }) => {
     await inRepo(async ({ repo }) => {
@@ -460,6 +461,69 @@ test("drop stops with exit 2 at the first refusal, after the line for what it di
     await withJira(refusing(match, status), async ({ config, seen }) => {
       await inRepo(async ({ repo }) => {
         deepStrictEqual(await cli(["drop", key, "Not built."], config, repo), { code: 2, stdout: "", stderr }, stderr);
+        strictEqual(seen.filter((s) => s.method !== "GET").length, writes, stderr);
+      });
+    });
+  }
+});
+
+/** A Jira that answers each close call as it should, with the tickets given for the issue read and the epic read. */
+const closeJira = (tickets, epics = {}) => (method, url) => {
+  const key = url.match(/JF-\d+/)?.[0];
+  if (method === "GET" && url.includes("?fields=")) return tickets[key] ?? [404];
+  if (method === "GET" && url.startsWith("/rest/agile/1.0/epic/")) return [200, { done: epics[key] ?? false }];
+  if (method === "GET") return [200, transitions];
+  if (url.endsWith("/comment")) return [201, { id: "1" }];
+  if (url.startsWith("/rest/agile/1.0/epic/")) return [200, { done: true }];
+  return [204];
+};
+
+test("close marks an epic's Epic Status done once the epic is Done, and leaves one already marked", async () => {
+  const jira = closeJira({
+    "JF-5": ticket("In Progress", { type: "Epic" }),
+    "JF-6": ticket("To Do", { type: "Epic" }),
+    "JF-10": ticket("Done", { type: "Epic" }),
+    "JF-11": ticket("Done", { type: "Epic" }),
+  }, { "JF-6": true, "JF-10": true });
+  await withJira(jira, async ({ config, seen }) => {
+    await inRepo(async ({ repo }) => {
+      deepStrictEqual(await cli(["close", "JF-5", "Its stories shipped."], config, repo), { code: 0, stderr: "",
+        stdout: "JF-5: In Progress to Done, with the reason posted. Epic marked done.\n" });
+      deepStrictEqual(calls(seen), [
+        `GET /rest/api/2/issue/JF-5${CLOSE_READ}`,
+        "GET /rest/agile/1.0/epic/JF-5",
+        ["POST /rest/api/2/issue/JF-5/comment", { body: "Closed without a release, since no commit names JF-5: Its stories shipped." }],
+        "GET /rest/api/2/issue/JF-5/transitions",
+        ["POST /rest/api/2/issue/JF-5/transitions", { transition: { id: "31" } }],
+        ["POST /rest/agile/1.0/epic/JF-5", { done: true }],
+      ]);
+      seen.length = 0;
+      deepStrictEqual(await cli(["close", "JF-11", "Its stories shipped."], config, repo), { code: 0, stderr: "",
+        stdout: "JF-11: already Done. Epic marked done.\n" });
+      deepStrictEqual(calls(seen), [`GET /rest/api/2/issue/JF-11${CLOSE_READ}`, "GET /rest/agile/1.0/epic/JF-11",
+        ["POST /rest/agile/1.0/epic/JF-11", { done: true }]]);
+      seen.length = 0;
+      deepStrictEqual(await cli(["close", "JF-6", "Its stories shipped."], config, repo), { code: 0, stderr: "",
+        stdout: "JF-6: To Do to Done, with the reason posted.\n" });
+      deepStrictEqual(calls(seen).at(-1), ["POST /rest/api/2/issue/JF-6/transitions", { transition: { id: "31" } }]);
+      seen.length = 0;
+      deepStrictEqual(await cli(["close", "JF-10", "Its stories shipped."], config, repo),
+        { code: 0, stderr: "", stdout: "JF-10: left as Done.\n" });
+      deepStrictEqual(calls(seen), [`GET /rest/api/2/issue/JF-10${CLOSE_READ}`, "GET /rest/agile/1.0/epic/JF-10"]);
+    });
+  });
+});
+
+test("close stops with exit 2 when Jira cannot say whether an epic is marked done, or refuses to mark it", async () => {
+  const base = closeJira({ "JF-5": ticket("To Do", { type: "Epic" }) });
+  for (const [match, status, stderr, writes] of [
+    [(m, u) => m === "GET" && u.startsWith("/rest/agile/1.0/epic/"), 500, "Jira answered 500 for the epic JF-5\n", 0],
+    [(m, u) => m === "POST" && u.startsWith("/rest/agile/1.0/epic/"), 400,
+      "JF-5: To Do to Done, with the reason posted.\nJira answered 400 to marking the epic JF-5 done\n", 3],
+  ]) {
+    await withJira((method, url) => (match(method, url) ? [status] : base(method, url)), async ({ config, seen }) => {
+      await inRepo(async ({ repo }) => {
+        deepStrictEqual(await cli(["close", "JF-5", "Its stories shipped."], config, repo), { code: 2, stdout: "", stderr }, stderr);
         strictEqual(seen.filter((s) => s.method !== "GET").length, writes, stderr);
       });
     });

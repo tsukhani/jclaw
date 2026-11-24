@@ -328,9 +328,11 @@ other ticket as it is, a key passed by mistake included.
 `close`, `drop` and `audit` keep Done meaning released (JF-504), since the policy guard refuses a Jira MCP move of a JF
 ticket to Done. `close` and `drop` are the other ways there, for a ticket that ships no code, and both refuse when a
 commit subject on a local or remote-tracking branch names the key, since that ticket reaches Done at its release.
-`close` is for work done with no commit to name it, such as a spike whose research is finished or a verification
-task: it posts the reason as a comment, then moves the ticket to Done, and leaves one already Done. Its sprint, points
-and Fix Version stay, since that work counts as delivered. `drop` is for a ticket that delivered nothing, such as a
+`close` is for work done with no commit to name it, such as a spike whose research is finished, a verification task
+or an epic whose stories have shipped: it posts the reason as a comment, then moves the ticket to Done, and leaves one
+already Done. It also marks an epic's Epic Status done, since Jira keeps that field apart from the workflow status and
+the backlog's Epics panel lists every epic it leaves open. On an epic already Done it adds only that mark, which
+repairs one closed before `close` set it. Its sprint, points and Fix Version stay, since that work counts as delivered. `drop` is for a ticket that delivered nothing, such as a
 won't-do, a duplicate or a superseded story (JF-555). It posts the reason after a line saying no code was delivered,
 moves the ticket to Done, and then takes away what would count it as delivered. It takes the ticket out of an open
 sprint, because Jira counts a Done ticket's points as completed when its sprint closes and `/backlog-grooming` sizes
