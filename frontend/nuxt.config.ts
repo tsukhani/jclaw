@@ -1,4 +1,6 @@
+import { join } from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
+import { BUILT_HTML_REPORT_FILE, checkBuiltHtml } from './tools/built-html-check'
 import { bundledPackages } from './tools/bundled-packages'
 
 const backendPort = process.env.JCLAW_BACKEND_PORT || '9000'
@@ -65,6 +67,9 @@ export default defineNuxtConfig({
         changeOrigin: true,
       },
     },
+    // ssr: false adds /index.html beside /, both write index.html at the same moment, and 8 of 10 builds came out with
+    // the two documents spliced into one file (JF-600). / alone writes the same page.
+    prerender: { ignore: [/^\/index\.html$/] },
     // Silence a cosmetic Rolldown warning from @nuxt/nitro-server's generated
     // h3.mjs re-export glue: it re-exports h3 symbols (H3Error, getCookie, ...)
     // the local module never uses, which Rolldown flags as unused external
@@ -126,6 +131,13 @@ export default defineNuxtConfig({
         'dompurify',
         'driver.js',
       ],
+    },
+  },
+
+  hooks: {
+    'nitro:init'(nitro) {
+      nitro.hooks.hook('prerender:done', ({ prerenderedRoutes }) =>
+        checkBuiltHtml(nitro.options.output.publicDir, join(nitro.options.rootDir, BUILT_HTML_REPORT_FILE), prerenderedRoutes))
     },
   },
 

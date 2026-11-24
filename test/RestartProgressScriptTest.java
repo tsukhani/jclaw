@@ -148,6 +148,12 @@ class RestartProgressScriptTest extends UnitTest {
             #!/bin/bash
             echo "npx $*" >> "$STUB_CALLS"
             probe spa
+            if [ -n "${STUB_HTML_CHECK_FAILS:-}" ]; then
+                mkdir -p node_modules/.cache/jclaw
+                printf '%s\\n' "$STUB_HTML_CHECK_FAILS" > node_modules/.cache/jclaw/built-html-check.txt
+                exit 1
+            fi
+            [ -n "${STUB_SPA_BUILD_FAILS:-}" ] && exit 1
             mkdir -p .output/public && echo spa > .output/public/index.html
             """;
 
@@ -315,6 +321,46 @@ class RestartProgressScriptTest extends UnitTest {
         assertTrue(newer.out().lines().toList().contains(
                 "==> Precompiling backend (gradle.lockfile is newer than precompiled/)..."), newer.out());
         assertEquals(List.of("play precompile"), calls().stream().filter(c -> c.equals("play precompile")).toList());
+    }
+
+    @Test
+    void aWebAppFailingItsHtmlCheckStopsTheRestartAndSaysWhy() throws Exception {
+        var reason = "the built web app failed its HTML check: index.html is written by two prerendered routes at once, which race each other";
+        builtCheckoutWhoseFrontendChanged();
+        var run = restart(Map.of("JCLAW_AOT", "off", "STUB_FAKE_NARRATOR", "1", "STUB_HTML_CHECK_FAILS", reason), false);
+        assertNotEquals(0, run.exit(), run.out());
+
+        assertTrue(run.out().contains("\nError: " + reason + ".\n"
+                + "       JClaw was not started, and public/spa still holds the web app built before.\n"
+                + "       The check's findings, and how to fix them, are printed above.\n"), run.out());
+        assertEquals("failed", status().get("state").getAsString());
+        assertEquals(reason, status().get("reason").getAsString());
+        assertEquals("the web app built before\n", Files.readString(home.resolve("public/spa/index.html")));
+        assertEquals(List.of("play stop"), calls().stream().filter(c -> c.startsWith("play ")).toList());
+    }
+
+    @Test
+    void aWebAppBuildFailingForAnotherReasonIgnoresTheReasonAnEarlierCheckLeft() throws Exception {
+        builtCheckoutWhoseFrontendChanged();
+        var earlier = Files.createDirectories(home.resolve("frontend/node_modules/.cache/jclaw")).resolve("built-html-check.txt");
+        Files.writeString(earlier, "the built web app failed its HTML check: an earlier build's reason\n");
+        var run = restart(Map.of("JCLAW_AOT", "off", "STUB_FAKE_NARRATOR", "1", "STUB_SPA_BUILD_FAILS", "1"), false);
+        assertNotEquals(0, run.exit(), run.out());
+
+        assertFalse(run.out().contains("Error: the built web app failed its HTML check"), run.out());
+        assertEquals("failed", status().get("state").getAsString());
+        assertEquals("building the web app failed", status().get("reason").getAsString());
+        assertFalse(Files.exists(earlier));
+        assertEquals("the web app built before\n", Files.readString(home.resolve("public/spa/index.html")));
+    }
+
+    /** A built source checkout running again, whose frontend has changed since, so the restart rebuilds the web app. */
+    private void builtCheckoutWhoseFrontendChanged() throws Exception {
+        builtSourceCheckout();
+        Files.writeString(home.resolve("public/spa/index.html"), "the web app built before\n");
+        Files.writeString(home.resolve("frontend/public/favicon.ico"), "another icon\n");
+        Files.writeString(home.resolve("server.pid"), oldJvm.pid() + "\n");
+        Files.deleteIfExists(tmp.resolve("calls.log"));
     }
 
     private void assertTheWebAppIsRebuiltBecause(String reason) throws Exception {

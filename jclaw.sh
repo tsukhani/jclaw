@@ -4058,7 +4058,19 @@ do_start_prod() {
             pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
             echo "==> Generating static SPA ($spa_rebuild_reason)..."
-            npx nuxi generate
+            # Written only by the build's HTML check (frontend/tools/built-html-check.ts); a failure without it is the build's own.
+            spa_check_report="$SCRIPT_DIR/frontend/node_modules/.cache/jclaw/built-html-check.txt"
+            rm -f "$spa_check_report"
+            if ! npx nuxi generate; then
+                if [[ -s "$spa_check_report" ]]; then
+                    RESTART_FAIL_REASON=$(head -n 1 "$spa_check_report" || true)
+                    echo ""
+                    echo "Error: ${RESTART_FAIL_REASON}."
+                    echo "       JClaw was not started, and public/spa still holds the web app built before."
+                    echo "       The check's findings, and how to fix them, are printed above."
+                fi
+                exit 1
+            fi
 
             echo "==> Copying SPA build to public/spa/..."
             rm -rf "$SCRIPT_DIR/public/spa"
