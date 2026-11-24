@@ -129,7 +129,8 @@ function Test-WantJre($reason) {
     if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
         Write-Host ''
         Write-Host $reason -ForegroundColor Yellow
-        $ans = Read-Host "Download a self-contained Zulu JRE $MinJava (~50 MB) into $JreDir? [Y/n]"
+        # PowerShell reads ? as part of a variable name, so the brace keeps it out of $JreDir.
+        $ans = Read-Host "Download a self-contained Zulu JRE $MinJava (~50 MB) into ${JreDir}? [Y/n]"
         return ($ans -notmatch '^(?i)n')
     }
     Substep "$reason Auto-installing Zulu JRE $MinJava (set JCLAW_NO_JRE=1 to use your own Java)"
