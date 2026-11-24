@@ -1,3 +1,6 @@
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
+import mockwebserver3.SocketEffect;
 import okhttp3.HttpUrl;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
@@ -22,11 +25,17 @@ import services.JavaRuntimeService.Vendor;
 import utils.AppClock;
 import utils.HttpFactories;
 
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
@@ -37,6 +46,8 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -772,6 +783,35 @@ class JavaRuntimeServiceTest extends UnitTest {
         assertEquals(TimeUnit.MINUTES.toNanos(30), timeout.get());
     }
 
+    // The daily job downloads on a virtual thread, and Azul's CDN answered it over HTTP/2 on TLS when one hung (JF-563).
+    @Test
+    void anHttp2DownloadOverTlsWhoseServerStallsMidBodyEndsAtTheReadTimeoutAndStagesNothing() throws Exception {
+        assertEquals("h2 SocketTimeoutException: timeout", stalledDownload(Protocol.HTTP_2, SocketEffect.Stall.INSTANCE));
+    }
+
+    @Test
+    void anHttp2DownloadOverTlsWhoseConnectionDropsMidBodyEndsAndStagesNothing() throws Exception {
+        assertEquals("h2 StreamResetException: stream was reset: CANCEL",
+                stalledDownload(Protocol.HTTP_2, new SocketEffect.CloseSocket()));
+    }
+
+    @Test
+    void anHttp2DownloadWhoseServerStallsMidBodyEndsAtTheReadTimeoutAndStagesNothing() throws Exception {
+        assertEquals("h2_prior_knowledge SocketTimeoutException: timeout",
+                stalledDownload(Protocol.H2_PRIOR_KNOWLEDGE, SocketEffect.Stall.INSTANCE));
+    }
+
+    @Test
+    void anHttp2DownloadWhoseConnectionDropsMidBodyEndsAndStagesNothing() throws Exception {
+        assertEquals("h2_prior_knowledge StreamResetException: stream was reset: CANCEL",
+                stalledDownload(Protocol.H2_PRIOR_KNOWLEDGE, new SocketEffect.CloseSocket()));
+    }
+
+    @Test
+    void anHttp1DownloadWhoseServerStallsMidBodyEndsAtTheReadTimeoutAndStagesNothing() throws Exception {
+        assertEquals("http/1.1 SocketTimeoutException: timeout", stalledDownload(Protocol.HTTP_1_1, SocketEffect.Stall.INSTANCE));
+    }
+
     @Test
     void aDownloadThatFailsItsChecksumStagesNothing() throws IOException {
         var home = Files.createDirectories(tmp.resolve("home"));
@@ -1208,6 +1248,97 @@ class JavaRuntimeServiceTest extends UnitTest {
         });
         if (failure.get() != null) throw failure.get();
         return staged;
+    }
+
+    /**
+     * A download on a virtual thread, as the daily job runs it, from a real socket that sends part of the archive
+     * and then {@code effect}: the protocol it was served over, the exception's class and its message, once it has
+     * checked the download read part of the body and left no {@code jre.staged/}. {@link Protocol#HTTP_2} is served
+     * over TLS, where ALPN picks it. The call timeout stays at its 30 minutes, so a timeout here is the 1 s read
+     * timeout, and a download still running after 30 s fails the test as the hang it would be.
+     */
+    private String stalledDownload(Protocol protocol, SocketEffect effect) throws Exception {
+        var bytes = new byte[1024 * 1024];
+        new Random(563).nextBytes(bytes);
+        try (var server = new MockWebServer()) {
+            var tls = protocol == Protocol.HTTP_2;
+            var protocols = tls ? List.of(Protocol.HTTP_2, Protocol.HTTP_1_1) : List.of(protocol);
+            var client = new OkHttpClient.Builder().protocols(protocols).readTimeout(Duration.ofSeconds(1));
+            if (tls) {
+                var keys = localhostKeys();
+                server.useHttps(serving(keys).getSocketFactory());
+                var trust = trusting(keys);
+                var context = SSLContext.getInstance("TLS");
+                context.init(null, new X509TrustManager[] {trust}, null);
+                client.sslSocketFactory(context.getSocketFactory(), trust);
+            }
+            server.setProtocols(protocols);
+            server.enqueue(new MockResponse.Builder().body(new Buffer().write(bytes)).onResponseBody(effect).build());
+            server.start();
+            var stub = HttpUrl.get((tls ? "https" : "http") + "://localhost:" + server.getPort() + "/zulu/bin/" + ARCHIVE);
+            var served = new AtomicReference<Protocol>();
+            // The response keeps the CDN request, so the download's landing check passes as it would there.
+            client.addInterceptor(chain -> {
+                var response = chain.proceed(chain.request().newBuilder().url(stub).build());
+                served.set(response.protocol());
+                return response.newBuilder().request(chain.request()).build();
+            });
+            var home = Files.createDirectories(tmp.resolve("home"));
+            var progress = new Download();
+            progress.begin();
+            var thrown = new CompletableFuture<Throwable>();
+            var downloader = client.build();
+            Thread.ofVirtual().start(() -> {
+                try {
+                    stage(downloader, new Release("25.0.5", URL, sha(bytes), ARCHIVE), home, progress);
+                    thrown.complete(null);
+                } catch (Throwable t) {
+                    thrown.complete(t);
+                }
+            });
+            var t = thrown.get(30, TimeUnit.SECONDS);
+            assertNotNull(t, "a download cut off mid-body was staged");
+            var percent = progress.currentPercent();
+            assertTrue(percent > 0 && percent < 100, "the stub sent " + percent + "% of the archive, not part of it");
+            assertFalse(Files.exists(home.resolve("jre.staged")), "a failed download left jre.staged");
+            return served.get() + " " + t.getClass().getSimpleName() + ": " + t.getMessage();
+        }
+    }
+
+    /** A certificate for localhost from the JDK's keytool, as {@code McpRedirectSavedHeadersTest} makes one. */
+    private KeyStore localhostKeys() throws Exception {
+        var keytool = Path.of(System.getProperty("java.home"), "bin", "keytool");
+        Assumptions.assumeTrue(Files.isExecutable(keytool), "the test JVM has no keytool");
+        var store = tmp.resolve("localhost.p12");
+        var p = new ProcessBuilder(keytool.toString(), "-genkeypair", "-alias", "cdn", "-keyalg", "EC",
+                "-dname", "CN=localhost", "-ext", "SAN=dns:localhost,ip:127.0.0.1", "-validity", "2",
+                "-storetype", "PKCS12", "-keystore", store.toString(), "-storepass", "changeit")
+                .redirectErrorStream(true).start();
+        var out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertTrue(p.waitFor(60, TimeUnit.SECONDS) && p.exitValue() == 0, out);
+        var keys = KeyStore.getInstance("PKCS12");
+        try (var in = Files.newInputStream(store)) {
+            keys.load(in, "changeit".toCharArray());
+        }
+        return keys;
+    }
+
+    private static SSLContext serving(KeyStore keys) throws Exception {
+        var factory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        factory.init(keys, "changeit".toCharArray());
+        var context = SSLContext.getInstance("TLS");
+        context.init(factory.getKeyManagers(), null, null);
+        return context;
+    }
+
+    /** Trusts exactly the certificate in {@code keys}. */
+    private static X509TrustManager trusting(KeyStore keys) throws Exception {
+        var trust = KeyStore.getInstance("PKCS12");
+        trust.load(null, null);
+        trust.setCertificateEntry("cdn", keys.getCertificate("cdn"));
+        var factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        factory.init(trust);
+        return (X509TrustManager) factory.getTrustManagers()[0];
     }
 
     private static OkHttpClient serving(byte[] body) {
