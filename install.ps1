@@ -149,6 +149,22 @@ function Find-ZuluJre {
     return $pkg
 }
 
+# The bin\java.exe under $JreDir, or $null when there is none.
+function Find-ManagedJava {
+    Get-ChildItem -Path $JreDir -Recurse -Filter 'java.exe' -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '\\bin\\java\.exe$' } | Select-Object -First 1
+}
+
+# The major version of the JRE in $JreDir when it can start JClaw, else $null.
+function Get-ManagedJavaMajor {
+    $java = Find-ManagedJava
+    if (-not $java) { return $null }
+    $jv = Get-JavaMajor { & $java.FullName -version }
+    if ($null -eq $jv -or $jv -lt $MinJava) { return $null }
+    if (-not (Test-JavaModule { & $java.FullName "--add-modules=$JavaModule" -version })) { return $null }
+    return $jv
+}
+
 # Download, checksum-verify, and unpack $pkg into $JreDir, then confirm it runs.
 # Throws on any failure.
 function Get-ZuluJre($pkg) {
@@ -173,8 +189,7 @@ function Get-ZuluJre($pkg) {
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     }
 
-    $java = Get-ChildItem -Path $JreDir -Recurse -Filter 'java.exe' -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\bin\\java\.exe$' } | Select-Object -First 1
+    $java = Find-ManagedJava
     if (-not $java) { throw "unpacked the JRE but found no bin\java.exe under $JreDir." }
     $out = Get-JavaVersionText { & $java.FullName -version }
     $jv  = Get-JavaMajorFrom $out
@@ -248,6 +263,9 @@ $gitBash = Find-GitBash
 $useWsl  = if ($gitBash) { $false } else { Test-Wsl }
 
 Step 'Checking prerequisites'
+# jclaw.sh starts on $JreDir whatever PATH holds, so an upgrade keeps that JRE: Remove-Item cannot delete
+# the jvm.dll the running JClaw holds open, and stopped the upgrade there (JF-559). WSL gets no managed JRE.
+$managedJv = if ($Upgrading -and -not $useWsl) { Get-ManagedJavaMajor }
 if ($useWsl) {
     $jv = Get-JavaMajor { wsl.exe bash -lc 'java -version' }
     if ($null -eq $jv) { Substep 'No Git Bash; WSL found.'; Show-JavaHelp; Die "WSL is present but has no Java $MinJava+ (install it inside your WSL distro)." }
@@ -257,6 +275,8 @@ if ($useWsl) {
         Show-JavaHelp; Die "WSL's Java $jv lacks the $JavaModule module JClaw starts with (install a full JRE or JDK $MinJava+ inside your WSL distro)."
     }
     Substep "Java $jv detected (in WSL)"
+} elseif ($null -ne $managedJv) {
+    Substep "Java $managedJv detected (managed JRE in $JreDir)"
 } else {
     $jv = Get-JavaMajor { java -version }
     $lacksModule = $null -ne $jv -and $jv -ge $MinJava -and -not (Test-JavaModule { java "--add-modules=$JavaModule" -version })
