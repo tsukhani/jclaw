@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { aggregate, descendants, nameOf, parseRollup, parseRoots, parseStat, snapshot } from '../src/memory.mjs'
 import { analyze, summarizeMemory } from '../src/analyze.mjs'
-import { compareMemory, render } from '../src/report.mjs'
+import { compareMemory, historyEntry, render } from '../src/report.mjs'
 
 const MiB = 1024
 const H = ['jclaw', 'openclaw', 'hermes']
@@ -174,4 +174,14 @@ test('the report lists a marked memory change against the previous run, and says
     memory: { jclaw: { measure: 'pss', medianKb, peakKb: 480 * MiB }, openclaw: null, hermes: { measure: 'rss', medianKb: 240 * MiB, peakKb: 260 * MiB } } }]
   assert.equal(reportOf([meta(), ...samples], base(360 * MiB)).text.includes("\n- JClaw's median memory: 360 → 450 MiB (+25%)\n"), true)
   assert.equal(reportOf([meta(), ...samples], base(450 * MiB)).text.includes("\nNo marked change in memory: no harness's median or peak moved by 20% or more.\n"), true)
+})
+
+test('a flagged JVM memory change shows the heap in use and held then and now, which the history keeps', () => {
+  const { analysis } = reportOf([meta(), ...withJvm])
+  const entry = historyEntry({ analysis, versions: { node: '26.13.1' }, host: 'testhost', runDir: '/r' })
+  assert.deepEqual(entry.memory.jclaw.heap, { usedMedianKb: 115 * MiB, usedPeakKb: 140 * MiB, committedMedianKb: 650 * MiB, committedPeakKb: 700 * MiB })
+  assert.equal(entry.memory.hermes.heap, undefined)
+  const base = [{ ...entry, at: '2026-11-24T00:00:00.000Z', versions: Object.fromEntries(H.map(h => [h, { tag: 'v1' }])),
+    memory: { ...entry.memory, jclaw: { ...entry.memory.jclaw, medianKb: 360 * MiB, heap: { usedMedianKb: 100 * MiB, usedPeakKb: 140 * MiB, committedMedianKb: 500 * MiB, committedPeakKb: 700 * MiB } } } }]
+  assert.equal(reportOf([meta(), ...withJvm], base).text.includes("\n- JClaw's median memory: 360 → 450 MiB (+25%); its JVM heap in use 100 → 115 MiB, held 500 → 650 MiB\n"), true)
 })

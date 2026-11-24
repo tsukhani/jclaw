@@ -149,7 +149,17 @@ export function render({ analysis, conformance, versions, turns, history, host }
       if (!base.memory || !memory) continue
       const memMarked = compareMemory(base.memory, memory)
       if (!memMarked.length) { p(`No marked change in memory: no harness's median or peak moved by ${MARKED_SHARE * 100}% or more.`); p(); continue }
-      for (const c of memMarked) p(`- ${N[c.harness]}'s ${c.metric === 'median' ? 'median' : 'peak'} memory: ${mib(c.was)} → ${mib(c.now)} MiB (${c.share > 0 ? '+' : ''}${Math.round(c.share * 100)}%)`)
+      // A JVM's process memory follows the heap it holds, which can differ between identical runs, so a flagged change
+      // shows the heap in use beside it: that is what says whether the harness needed more.
+      for (const c of memMarked) {
+        const k = c.metric === 'median' ? 'Median' : 'Peak'
+        const then = base.memory[c.harness]?.heap
+        const r = memory[c.harness]?.runtime
+        const heap = then && r?.kind === 'jvm'
+          ? `; its JVM heap in use ${mib(then[`used${k}Kb`])} → ${mib(r[`heapUsed${k}Kb`])} MiB, held ${mib(then[`committed${k}Kb`])} → ${mib(r[`heapCommitted${k}Kb`])} MiB`
+          : ''
+        p(`- ${N[c.harness]}'s ${c.metric} memory: ${mib(c.was)} → ${mib(c.now)} MiB (${c.share > 0 ? '+' : ''}${Math.round(c.share * 100)}%)${heap}`)
+      }
       p()
     }
   }
@@ -245,6 +255,15 @@ export function render({ analysis, conformance, versions, turns, history, host }
   return out.join('\n') + '\n'
 }
 
+/** The line history.jsonl keeps for a run that passed conformance: what later runs are compared with. */
+export function historyEntry({ analysis, versions, host, runDir }) {
+  const keep = ['ownP50', 'ownP25', 'ownP75', 'e2eP50', 'e2eP25', 'e2eP75', 'correct', 'of']
+  const summary = Object.fromEntries(Object.entries(analysis.summary).map(([k, v]) => [k, Object.fromEntries(keep.map(x => [x, v[x]]))]))
+  const heapOf = r => (r?.kind === 'jvm' ? { usedMedianKb: r.heapUsedMedianKb, usedPeakKb: r.heapUsedPeakKb, committedMedianKb: r.heapCommittedMedianKb, committedPeakKb: r.heapCommittedPeakKb } : undefined)
+  const memory = analysis.memory && Object.fromEntries(Object.entries(analysis.memory).map(([h, m]) => [h, m && { measure: m.measure, startKb: m.startKb, medianKb: m.medianKb, peakKb: m.peakKb, endKb: m.endKb, heap: heapOf(m.runtime) }]))
+  return { at: analysis.meta.at, host, model: analysis.meta.model ?? config.model, runDir, versions, summary, memory }
+}
+
 if (isMain(import.meta.url)) {
   const { values } = parseArgs({ options: { 'run-dir': { type: 'string', default: process.env.RUN_DIR }, history: { type: 'string', default: process.env.BENCH_HISTORY } } })
   const dir = values['run-dir']
@@ -256,11 +275,6 @@ if (isMain(import.meta.url)) {
   const history = values.history ? readJsonl(values.history) : []
   const host = process.env.BENCH_HOST ?? os.hostname().split('.')[0]
   fs.writeFileSync(path.join(dir, 'report.md'), render({ analysis, conformance, versions, turns, history, host }))
-  if (conformance.pass && values.history) {
-    const keep = ['ownP50', 'ownP25', 'ownP75', 'e2eP50', 'e2eP25', 'e2eP75', 'correct', 'of']
-    const summary = Object.fromEntries(Object.entries(analysis.summary).map(([k, v]) => [k, Object.fromEntries(keep.map(x => [x, v[x]]))]))
-    const memory = analysis.memory && Object.fromEntries(Object.entries(analysis.memory).map(([h, m]) => [h, m && { measure: m.measure, startKb: m.startKb, medianKb: m.medianKb, peakKb: m.peakKb, endKb: m.endKb }]))
-    fs.appendFileSync(values.history, JSON.stringify({ at: analysis.meta.at, host, model: analysis.meta.model ?? config.model, runDir: dir, versions, summary, memory }) + '\n')
-  }
+  if (conformance.pass && values.history) fs.appendFileSync(values.history, JSON.stringify(historyEntry({ analysis, versions, host, runDir: dir })) + '\n')
   console.log(`report: ${path.join(dir, 'report.md')}${conformance.pass ? '' : ' (conformance failed: no verdict, not added to the history)'}`)
 }
