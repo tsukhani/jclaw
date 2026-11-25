@@ -25,7 +25,7 @@ Reject anything else with a clear message; do not guess.
 
 **Phase 1 — Establish the source scope**
 
-Enumerate the target source files with `git ls-files -- <scope>` restricted to source extensions — `*.java`, `*.vue`, `*.ts`, `*.js`, `*.mjs`, `*.py` (`history`'s scope: `app/ test/ frontend/ sidecar/`). Use `git grep` for the detection passes; it searches exactly the tracked set and is fast. Exclude this command file itself (`.claude/commands/secret-scan.md`) — it documents the regexes below and would self-match. For the range, the pathspec is `-- . ':!.claude/commands/secret-scan.md'` (every tracked file but this one), any extension, since `-I` already skips binaries; record `BASE` and the commit count `/usr/bin/git rev-list --count "$BASE"..HEAD`, both for the report. A count of 0 means nothing since `BASE`, so the verdict is CLEAN once the control below has passed. For `staged`, use `git diff --cached`; for `history`, plan the cross-revision pass (Phase 4).
+Enumerate the target source files with `git ls-files -- <scope>` restricted to source extensions — `*.java`, `*.vue`, `*.ts`, `*.js`, `*.mjs`, `*.py` (`history`'s scope: `app/ test/ frontend/ sidecar/`). Use `git grep` for the detection passes; it searches exactly the tracked set and is fast. Exclude this command file itself (`.claude/commands/secret-scan.md`) — it documents the regexes below and would self-match. For the range, the pathspec is `-- . ':!.claude/commands/secret-scan.md'` (every tracked file but this one), any extension, since `-I` already skips binaries; record `BASE` and the commit count, both for the report, which `node bin/secret-scan-range.mjs range` prints (`v1.0.30 15`). A count of 0 means nothing since `BASE`, so the verdict is CLEAN once the control below has passed. For `staged`, use `git diff --cached`; for `history`, plan the cross-revision pass (Phase 4).
 
 **Phase 2 — Detection battery (grep source files, then verify each hit in context)**
 
@@ -39,32 +39,24 @@ Three more invocation traps with the same false-CLEAN signature:
 - **`-e` before any pattern starting with `-`.** The two `-----BEGIN` patterns are otherwise parsed as command-line options: `git grep -nIP -e '-----BEGIN( [A-Z0-9]+)? PRIVATE KEY-----'`.
 - **Never `2>/dev/null` a detection pass.** It hides precisely these errors, which is what makes a broken scan indistinguishable from a clean repo.
 
-**The range (the default): new lines only.** Run each pattern over every commit in the range and over `BASE`, and keep what `BASE` did not hold, in a temporary directory `T` (the session's scratchpad when it has one):
+**The range (the default): new lines only.** For each pattern, `bin/secret-scan-range.mjs` greps every commit in the range and `BASE`, and keeps what `BASE` did not hold; for a path argument, give the path after the pattern:
 
 ```bash
-/usr/bin/git grep -nIP -e "$P" $(/usr/bin/git rev-list "$BASE"..HEAD) -- . ':!.claude/commands/secret-scan.md' > "$T/range.txt"
-/usr/bin/git grep -nIP -e "$P" "$BASE" -- . ':!.claude/commands/secret-scan.md' > "$T/base.txt"
-awk -F: 'FILENAME == ARGV[1] { base[$2 FS substr($0, length($1)+length($2)+length($3)+4)]; next }
-         { k = $2 FS substr($0, length($1)+length($2)+length($3)+4)
-           if (!(k in base) && !(k in seen)) { seen[k]; print } }' "$T/base.txt" "$T/range.txt"
+node bin/secret-scan-range.mjs lines -P "$P"
 ```
 
-Each line reads `<sha>:<path>:<line>:<text>`. A path and text `BASE` already held shipped before and are dropped; what is left was added in the range. `git grep` reports the trees in the order given, newest first, so the SHA on a kept line is the newest commit holding it: `HEAD`'s SHA means the line is in the tree, and any other means a later commit deleted it while the range's history still carries it. Two traps, each found while writing this recipe, and each a false CLEAN:
+Each line reads `<sha>:<path>:<line>:<text>`. A path and text `BASE` already held shipped before and are dropped, even where the range moved the line; what is left was added in the range. The SHA on a kept line is the newest commit holding it: `HEAD`'s SHA means the line is in the tree, and any other means a later commit deleted it while the range's history still carries it. The script leaves this file out, passes the pattern with `-e` and each revision as its own argument, so the dash and zsh traps above cannot reach it, and exits 2 with git's reason when a pass fails, an invalid pattern or a checkout with no `v*` tag among them, so a broken pass never reads as a clean one. Its tests pin each of those, and a pattern the release matched nothing for, which an earlier filter here filed as already released. The filters are a script rather than shell here because a command run with arguments has each dollar sign followed by a digit in its text replaced by an argument's word: the `awk` this command once held came out garbled when `/release-check` ran it.
 
-- **`FILENAME == ARGV[1]`, never `FNR == NR`.** A pattern with no hit at `BASE` leaves the baseline file empty, so `FNR == NR` stays true through the range file and every new hit is filed as baseline. That is a CLEAN in exactly the case the scan exists for.
-- **The revision list inline**, as `$(/usr/bin/git rev-list …)`. zsh does not word-split a variable holding it, so git receives every SHA as one revision, prints `unable to resolve revision` and matches nothing, which is the pathspec trap above in another place.
-
-**The commit messages (the range only).** Write each message line with its commit's SHA in front, leaving out the `Co-Authored-By:` trailers, whose `noreply@` address is attribution and would hit the email pattern on every commit, then grep that file:
+**The commit messages (the range only).** `messages` prints each message line with its commit's short SHA in front, leaving out the `Co-Authored-By:` trailers, whose `noreply@` address is attribution and would hit the email pattern on every commit. Write it to a temporary directory `T` (the session's scratchpad when it has one) and grep that file:
 
 ```bash
-/usr/bin/git log --format='@@%h%n%B' "$BASE"..HEAD \
-  | awk '/^@@/ { c = substr($0, 3); next } /^Co-Authored-By: / { next } { print c ": " $0 }' > "$T/messages.txt"
+node bin/secret-scan-range.mjs messages > "$T/messages.txt"
 (cd "$T" && /usr/bin/git grep --no-index -nIP -e "$P" -- messages.txt)
 ```
 
 Each hit reads `messages.txt:<n>:<sha>: <the message line>`. Nothing is subtracted here, since every message in the range is new. Run in `/release-check`'s worktree, the range ends at the release commit, so its body, the release notes, is scanned too. The control: the newest commit's subject, as a fixed string (`-F`), must be found in `messages.txt`.
 
-**Prove the harness before trusting a zero.** Before reporting anything, run a known-positive control — `git grep -cP 'looksLikeSecret' -- test` must be non-zero, and each tree's source-file count must be non-zero. For the range, run the control over the range's commits (`/usr/bin/git grep -cP 'looksLikeSecret' $(/usr/bin/git rev-list "$BASE"..HEAD) -- test`, non-zero), and prove the filter as well: put one distinctive line the range added through the recipe as a fixed string (`-F` for `-P`), choosing a line `/usr/bin/git grep -F` does not find at `BASE`, and it must come out. A pass that has not been shown capable of matching is not evidence of absence (AGENTS.md §6: *a green result you did not scope is not evidence*). State in the report that the control passed, so the CLEAN verdict is falsifiable.
+**Prove the harness before trusting a zero.** Before reporting anything, run a known-positive control — `git grep -cP 'looksLikeSecret' -- test` must be non-zero, and each tree's source-file count must be non-zero. For the range, run the control over the range's commits (`/usr/bin/git grep -cP 'looksLikeSecret' $(/usr/bin/git rev-list "$BASE"..HEAD) -- test`, non-zero), and prove the filter as well: give one distinctive line the range added to `node bin/secret-scan-range.mjs lines -F '<line>'`, choosing a line `/usr/bin/git grep -F` does not find at `BASE`, and it must come out. A pass that has not been shown capable of matching is not evidence of absence (AGENTS.md §6: *a green result you did not scope is not evidence*). State in the report that the control passed, so the CLEAN verdict is falsifiable.
 
 *Cryptographic material (CRITICAL — a private key literal in code):*
 - `-----BEGIN( [A-Z0-9]+)? PRIVATE KEY-----` · `-----BEGIN PGP PRIVATE KEY BLOCK-----`

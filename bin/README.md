@@ -31,6 +31,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `ghcr-prune.test.mjs` | Its tests: `node --test bin/ghcr-prune.test.mjs` |
 | `retired-release-files.mjs` | Writes `conf/retired-release-files.tsv`, what releases up to v1.0.23 shipped at paths this tree no longer ships — see below |
 | `retired-release-files.test.mjs` | Its tests, a stale table among them: `node --test bin/retired-release-files.test.mjs` |
+| `secret-scan-range.mjs` | The lines a pattern matches that the commits since the last release added, and those commits' messages, for `/secret-scan` — see below |
+| `secret-scan-range.test.mjs` | Its tests, a pattern the release matched nothing for among them: `node --test bin/secret-scan-range.test.mjs` |
 | `eslint.config.mjs` | ESLint's recommended rules for these scripts, which `./jclaw.sh check` runs; it loads ESLint from `frontend/`'s dependencies |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
 | `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
@@ -469,3 +471,27 @@ either. A path the index ships stays out. Rerun it when a commit stops shipping 
 
 Exit 0 wrote the table or found it current, exit 1 `--check` found it stale, exit 2 git failed or the clone has no
 `v*` tag up to v1.0.23.
+
+## secret-scan-range.mjs
+
+```bash
+node bin/secret-scan-range.mjs range                  # v1.0.30 15: the last release's tag and the commits after it
+node bin/secret-scan-range.mjs lines -P '<pattern>'   # each line the range added that the pattern matches
+node bin/secret-scan-range.mjs lines -F '<string>' bin docs   # a fixed string, under those paths only
+node bin/secret-scan-range.mjs messages               # the range's commit messages, each line behind its short sha
+```
+
+`/secret-scan` with no argument reads what a release would publish: every commit after the newest `v*` tag reachable
+from `HEAD`, since `/deploy` tags each version it ships, and those commits' messages, the release notes among them.
+`lines` greps every commit in that range and the tag itself, every tracked file but `.claude/commands/secret-scan.md`
+(which documents the patterns), and prints `<sha>:<path>:<line>:<text>` for each path and text the tag did not hold,
+once, with the newest commit that holds it. A line the range moved is left out; a line it added and deleted again is
+kept, with the commit that still holds it. `messages` leaves out the `Co-Authored-By:` trailers, whose `noreply@`
+address would match the email pattern on every commit.
+
+It is a script, not shell in the command, because a command run with arguments has each dollar sign followed by a
+digit in its text replaced by an argument's word, which garbled the `awk` filters it replaces when `/release-check`
+ran the scan.
+
+Exit 0 printed what it found, which may be nothing. Exit 2 means a malformed command line, or a git that failed, such
+as an invalid pattern or a checkout with no `v*` tag, so a pass that could not run never reads as a clean one.
