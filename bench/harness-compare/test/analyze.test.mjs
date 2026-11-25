@@ -127,11 +127,16 @@ test('fails the error check above its limit and passes at it', () => {
   assert.deepEqual(failing(lines, proxy, limits), ['openclaw:errors'])
 })
 
-test('marks a change only when it is 20% or more and outside the earlier range', () => {
-  const was = { 'question|jclaw': { ownP50: 100, ownP25: 90, ownP75: 110, e2eP50: 700, e2eP25: 600, e2eP75: 800 } }
-  const at = (own, e2e) => ({ 'question|jclaw': { ownP50: own, e2eP50: e2e } })
-  assert.deepEqual(compare(was, at(121, 700)).map(c => [c.metric, Math.round(c.share * 100)]), [['own', 21]])
-  assert.deepEqual(compare(was, at(119, 700)), [])
-  assert.deepEqual(compare(was, at(100, 840)).map(c => [c.metric, Math.round(c.share * 100)]), [['e2e', 20]])
-  assert.deepEqual(compare(was, at(100, 780)), [])
+test('marks a change only when it is 20% or more and the two runs\' 25th–75th percentile ranges do not overlap', () => {
+  const was = { 'search1|jclaw': { ownP50: 25, ownP25: 21, ownP75: 29, e2eP50: 700, e2eP25: 600, e2eP75: 800 } }
+  const at = ([o50, o25, o75], [e50, e25, e75]) => ({ 'search1|jclaw': { ownP50: o50, ownP25: o25, ownP75: o75, e2eP50: e50, e2eP25: e25, e2eP75: e75 } })
+  const marked = cur => compare(was, cur).map(c => [c.metric, Math.round(c.share * 100)])
+  const same = [700, 600, 800]
+  // Two runs of identical releases on 2026-11-25: the median left the earlier range, but the ranges overlap.
+  assert.deepEqual(marked(at([30, 24, 33], same)), [])
+  assert.deepEqual(marked(at([30, 29.5, 33], same)), [['own', 20]])
+  assert.deepEqual(marked(at([30, 29, 33], same)), [])
+  assert.deepEqual(marked(at([25, 21, 29], [820, 801, 900])), [])
+  assert.deepEqual(marked(at([25, 21, 29], [840, 801, 900])), [['e2e', 20]])
+  assert.deepEqual(marked(at([25, 21, 29], [560, 500, 599])), [['e2e', -20]])
 })

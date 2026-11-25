@@ -1,6 +1,6 @@
 // Writes report.md for a finished run and, when the run passed conformance, appends its summary to history.jsonl.
-// A run is compared with the previous and the first run of the same host and model: a median that moved by at least
-// MARKED_SHARE and left the previous run's 25th–75th percentile range is a marked change.
+// A run is compared with the previous and the first run of the same host, model and Node.js major: a median that moved
+// by at least MARKED_SHARE, with the two runs' 25th–75th percentile ranges apart, is a marked change.
 // Usage: node report.mjs [--run-dir dir] [--history file]
 import fs from 'node:fs'
 import os from 'node:os'
@@ -30,8 +30,10 @@ export function compare(prev, cur) {
       const b = now[`${k}P50`]
       if (a == null || b == null || a === 0) continue
       const share = (b - a) / a
-      const outside = b < was[`${k}P25`] || b > was[`${k}P75`]
-      if (Math.abs(share) >= MARKED_SHARE && outside) changes.push({ key, metric: k, was: a, now: b, share })
+      // A median merely leaving the earlier range marked 5 of 48 medians between two runs of identical releases
+      // (2026-11-25); requiring the ranges themselves to part marked 1.
+      const apart = now[`${k}P75`] < was[`${k}P25`] || now[`${k}P25`] > was[`${k}P75`]
+      if (Math.abs(share) >= MARKED_SHARE && apart) changes.push({ key, metric: k, was: a, now: b, share })
     }
   }
   return changes
@@ -139,7 +141,7 @@ export function render({ analysis, conformance, versions, turns, history, host }
       p(`**Against ${label}** (${base.at.slice(0, 16).replace('T', ' ')} UTC): ${vs.length ? `versions changed: ${vs.join(', ')}` : 'no version changed'}.`)
       p()
       if (!marked.length) {
-        p(`No marked change in time: no median own or end-to-end time moved by ${MARKED_SHARE * 100}% or more and out of that run's 25th–75th percentile range.`)
+        p(`No marked change in time: no median own or end-to-end time moved by ${MARKED_SHARE * 100}% or more with its 25th–75th percentile range apart from that run's.`)
       } else {
         p('| Task | Harness | Measure | Then, median | Now, median | Change |')
         p('|---|---|---|---|---|---|')
