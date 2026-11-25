@@ -3,14 +3,16 @@
 // provider's drift over the window falls evenly on all three.
 // Usage: node driver.mjs [--runs 10] [--tasks a,b] [--harnesses jclaw,openclaw,hermes] [--out file]
 //                        [--pids jclaw=PID,openclaw=PID,hermes=PID]
-// With --pids it also samples each harness's memory once after the warm-up, before every turn and at the end.
+// With --pids it also samples each harness's memory, and how busy the host is, once after the warm-up, before every
+// turn and at the end.
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { config, HARNESSES, statusUrl, now } from './config.mjs'
 import { TASKS, groundTruth } from './tasks.mjs'
 import { ADAPTERS } from './adapters.mjs'
-import { parseRoots, snapshot } from './memory.mjs'
+import { parseRoots, sample } from './memory.mjs'
 
 const { values: opt } = parseArgs({
   options: {
@@ -32,12 +34,12 @@ const write = (row) => sink.write(JSON.stringify(row) + '\n')
 // its map lock for a moment, which must never land inside a timed turn.
 async function sampleMemory(phase) {
   if (!Object.keys(roots).length) return
-  const trees = snapshot(roots)
+  const { trees, host } = sample(roots)
   const runtime = {}
   for (const h of harnesses) {
     if (ADAPTERS[h].runtimeMemory) runtime[h] = await ADAPTERS[h].runtimeMemory().catch(e => ({ error: String(e?.message ?? e) }))
   }
-  write({ kind: 'memory', phase, at: Date.now(), trees, runtime })
+  write({ kind: 'memory', phase, at: Date.now(), trees, runtime, host })
 }
 
 // Waits until no harness has a request in flight and none has had one for quietMs, so one harness's background
@@ -55,7 +57,7 @@ async function quiesce() {
 }
 
 const truth = await groundTruth()
-write({ kind: 'meta', at: new Date().toISOString(), truth, runs, tasks: tasks.map(t => t.id), harnesses, quietMs: config.quietMs, model: config.model })
+write({ kind: 'meta', at: new Date().toISOString(), truth, runs, tasks: tasks.map(t => t.id), harnesses, quietMs: config.quietMs, model: config.model, user: os.userInfo().username })
 console.log('ground truth', JSON.stringify(truth))
 
 for (const h of harnesses) await ADAPTERS[h].init?.()

@@ -1,14 +1,19 @@
 // Measures each harness's memory as the whole process tree under the process it was started as, so JClaw's sidecars
 // count with its JVM. On Linux it reads PSS, which splits a page shared between processes among them, so a tree's sum
 // counts a shared library once. Elsewhere `ps` gives only RSS, which counts a shared page in every process using it.
+// Each sample also records how busy the host was, so a slower run on a host other work was loading can be told apart.
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
-// /proc/<pid>/stat: "pid (comm) state ppid …", where comm may itself hold spaces and parentheses.
+// /proc/<pid>/stat: "pid (comm) state ppid …", where comm may itself hold spaces and parentheses. Its CPU ticks add the
+// children it has reaped to its own, so the time of a process that exited between two samples is not lost.
 export function parseStat(text) {
   const close = text.lastIndexOf(')')
-  return { name: text.slice(text.indexOf('(') + 1, close), ppid: Number(text.slice(close + 2).split(' ')[1]) }
+  const f = text.slice(close + 2).split(' ')
+  const ticks = [11, 12, 13, 14].reduce((sum, i) => sum + (Number(f[i]) || 0), 0)
+  return { name: text.slice(text.indexOf('(') + 1, close), ppid: Number(f[1]), ticks }
 }
 
 // The kernel's process name says little: Node calls every main thread "MainThread", and names stop at 15 characters.
@@ -54,7 +59,7 @@ function linuxTable() {
   for (const d of fs.readdirSync('/proc')) {
     if (!/^\d+$/.test(d)) continue
     try {
-      table.set(Number(d), parseStat(fs.readFileSync(`/proc/${d}/stat`, 'utf8')))
+      table.set(Number(d), { ...parseStat(fs.readFileSync(`/proc/${d}/stat`, 'utf8')), uid: fs.statSync(`/proc/${d}`).uid })
     } catch {
       // The process exited between the listing and the read.
     }
@@ -99,22 +104,68 @@ function psTable() {
   return table
 }
 
+// The aggregate "cpu" line of /proc/stat: user nice system idle iowait irq softirq steal, then guest time, which user
+// and nice already include. Ticks are summed over every CPU, so busy / total × CPUs is the number of cores in use.
+export function parseCpuLine(text) {
+  const v = text.match(/^cpu\s+(.+)$/m)[1].trim().split(/\s+/).map(Number).slice(0, 8)
+  const total = v.reduce((a, b) => a + b, 0)
+  return { totalTicks: total, busyTicks: total - v[3] - (v[4] ?? 0) }
+}
+
+let users
+function userName(uid) {
+  if (!users) {
+    users = new Map()
+    try {
+      for (const line of fs.readFileSync('/etc/passwd', 'utf8').split('\n')) {
+        const [name, , id] = line.split(':')
+        if (name && id) users.set(Number(id), name)
+      }
+    } catch {
+      // Without the user table a user is named by its uid.
+    }
+  }
+  return users.get(uid) ?? `uid ${uid}`
+}
+
+function linuxHost(table, inTrees) {
+  let harnessTicks = 0
+  const byUser = {}
+  for (const [pid, p] of table) {
+    if (inTrees.has(pid)) harnessTicks += p.ticks
+    else {
+      const user = userName(p.uid)
+      byUser[user] = (byUser[user] ?? 0) + p.ticks
+    }
+  }
+  return { load1: Number(fs.readFileSync('/proc/loadavg', 'utf8').split(' ')[0]), cpus: os.availableParallelism(),
+    ...parseCpuLine(fs.readFileSync('/proc/stat', 'utf8')), harnessTicks, byUser }
+}
+
 /** Each root's process tree, its memory added up by process name; a root that is not running gives no processes. */
-export function snapshot(roots) {
+export const snapshot = (roots) => sample(roots).trees
+
+/**
+ * The trees, and the host: its 1-minute load average and CPU count and, on Linux, the CPU ticks so far of the host,
+ * of the trees and of every other process by user, which consecutive samples turn into the cores other work used.
+ */
+export function sample(roots) {
   const linux = process.platform === 'linux'
   const table = linux ? linuxTable() : psTable()
-  const out = {}
+  const trees = {}
+  const inTrees = new Set()
   for (const [harness, root] of Object.entries(roots)) {
     const procs = []
     for (const pid of descendants(table, root)) {
+      inTrees.add(pid)
       const p = table.get(pid)
       const m = linux ? linuxMemory(pid) : { pssKb: null, rssKb: p.rssKb }
       // Kernel threads have no memory of their own to report.
       if (m && m.rssKb != null) procs.push({ name: linux ? linuxName(pid, p.name) : p.name, ...m })
     }
-    out[harness] = aggregate(procs)
+    trees[harness] = aggregate(procs)
   }
-  return out
+  return { trees, host: linux ? linuxHost(table, inTrees) : { load1: os.loadavg()[0], cpus: os.availableParallelism() } }
 }
 
 export function aggregate(procs) {

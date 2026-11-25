@@ -1,15 +1,21 @@
 // Writes report.md for a finished run and, when the run passed conformance, appends its summary to history.jsonl.
 // A run is compared with the previous and the first run of the same host, model and Node.js major: a median that moved
-// by at least MARKED_SHARE, with the two runs' 25th–75th percentile ranges apart, is a marked change.
+// by at least MARKED_SHARE, with the two runs' 25th–75th percentile ranges apart, is a marked change, and a harness whose
+// own time moved by ACROSS_SHARE across its tasks, with a rank test over every timed turn agreeing, is worth a look.
 // Usage: node report.mjs [--run-dir dir] [--history file]
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { config, HARNESSES, isMain } from './config.mjs'
-import { readJsonl, quantile } from './analyze.mjs'
+import { mannWhitney, readJsonl, quantile } from './analyze.mjs'
 
 export const MARKED_SHARE = 0.2
+// Per task, a uniform 20% slowdown of JClaw's own time cleared MARKED_SHARE with the ranges apart in 4 of 20 pairs of
+// five identical runs; across tasks, a 10% line caught it in all 20 and marked none of the identical pairs (2026-11-25).
+// A 20% line there would catch a real 20% slowdown only half the time.
+export const ACROSS_SHARE = 0.1
+export const ACROSS_P = 0.01
 const N = { jclaw: 'JClaw', openclaw: 'OpenClaw', hermes: 'Hermes' }
 const LABEL = {
   question: 'One-line factual question, fresh conversation', followup: 'Follow-up in the same conversation (second turn timed)',
@@ -57,6 +63,44 @@ export function compareMemory(prev, cur) {
   return changes
 }
 
+/** Each harness's own time per timed turn, to 0.01 ms: what the rank test across tasks needs from the earlier run. */
+export function ownSamplesOf(rows) {
+  return Object.fromEntries(HARNESSES.map(h => [h, rows.filter(r => r.harness === h && r.timed && !r.bad && r.own != null).map(r => Math.round(r.own * 100) / 100)]))
+}
+
+/**
+ * Per harness, the median of its tasks' changes in median own time, marked from ACROSS_SHARE either way when a
+ * Mann–Whitney test over every timed turn of the two runs gives p below ACROSS_P. Null when the earlier run's history
+ * line keeps no per-turn own times.
+ */
+export function compareAcrossTasks(base, summary, samples) {
+  if (!base.ownSamples) return null
+  const out = []
+  for (const h of HARNESSES) {
+    const was = base.ownSamples[h]
+    const now = samples[h]
+    if (!was?.length || !now?.length) continue
+    // The median of the tasks' changes, not of all turns pooled: a pooled median sits wherever the task mix puts it,
+    // and JClaw's pooled end-to-end median moved 21.6% between two identical runs in which 5 of 8 tasks moved under 10%.
+    const ratios = Object.keys(summary).filter(k => k.endsWith(`|${h}`) && base.summary?.[k]?.ownP50 > 0 && summary[k].ownP50 != null)
+      .map(k => summary[k].ownP50 / base.summary[k].ownP50)
+    if (!ratios.length) continue
+    const shift = quantile(ratios, 0.5) - 1
+    const p = mannWhitney(was, now)
+    if (Math.abs(shift) >= ACROSS_SHARE && p < ACROSS_P) out.push({ harness: h, shift, p, tasks: ratios.length, n: [was.length, now.length] })
+  }
+  return out
+}
+
+const cores = v => v.toFixed(1)
+const pText = v => (v < 0.0001 ? 'p below 0.0001' : `p = ${v.toFixed(4)}`)
+function busyNote(then, now) {
+  if (now?.otherCoresMedian == null) return ''
+  return then?.otherCoresMedian != null
+    ? ` Outside the harnesses the host used a median of ${cores(then.otherCoresMedian)} cores then and ${cores(now.otherCoresMedian)} now, of ${now.cpus}.`
+    : ` Outside the harnesses the host used a median of ${cores(now.otherCoresMedian)} of its ${now.cpus} cores; that run did not record it.`
+}
+
 const mib = kb => (kb == null ? '–' : Math.round(kb / 1024).toLocaleString('en-US'))
 const nodeMajorOf = v => (v?.node ? Number(String(v.node).split('.')[0]) : null)
 
@@ -71,7 +115,8 @@ function e2eNote(S, task) {
 }
 
 export function render({ analysis, conformance, versions, turns, history, host }) {
-  const { meta, rows, summary: S, background, memory } = analysis
+  const { meta, rows, summary: S, background, memory, host: busy } = analysis
+  const samplesNow = ownSamplesOf(rows)
   const model = meta.model ?? config.model
   const out = []
   const p = (s = '') => out.push(s)
@@ -146,6 +191,15 @@ export function render({ analysis, conformance, versions, turns, history, host }
         p('| Task | Harness | Measure | Then, median | Now, median | Change |')
         p('|---|---|---|---|---|---|')
         for (const c of marked) { const [t, h] = c.key.split('|'); p(`| ${t} | ${N[h]} | ${c.metric === 'own' ? 'own time' : 'end to end'} | ${f(c.was)} ms | ${f(c.now)} ms | ${c.share > 0 ? '+' : ''}${Math.round(c.share * 100)}% |`) }
+      }
+      p()
+      const across = compareAcrossTasks(base, S, samplesNow)
+      if (!across) p("The check across tasks was left out: that run's history line keeps no per-turn own times.")
+      else if (!across.length) p(`No harness's own time moved by ${ACROSS_SHARE * 100}% or more across its tasks with a rank test p below ${ACROSS_P}.`)
+      else {
+        for (const c of across) p(`- **Worth a look:** ${N[c.harness]}'s own time moved ${c.shift > 0 ? '+' : ''}${Math.round(c.shift * 100)}% across its ${c.tasks} tasks, the median of their changes (Mann–Whitney ${pText(c.p)} over ${c.n[0]} turns then and ${c.n[1]} now).${busyNote(base.hostLoad, busy)}`)
+        p()
+        p(`A move across tasks is a first sign, not proof of a slowdown: its ${ACROSS_SHARE * 100}% line was set on five identical runs from one quiet night, between which it moved by 6.3% at most.`)
       }
       p()
       if (!base.memory || !memory) continue
@@ -247,6 +301,18 @@ export function render({ analysis, conformance, versions, turns, history, host }
     }
   }
   p()
+  p('## Host during the run')
+  p()
+  if (!busy) p('Not measured in this run.')
+  else {
+    const head = `Sampled with memory, when no request was in flight. The 1-minute load average was ${cores(busy.load1Median)} at the median and ${cores(busy.load1Peak)} at the most, on ${busy.cpus} cores.`
+    if (busy.otherCoresMedian == null) p(`${head} Which processes kept the host busy is read from Linux's /proc, so it is not known here.`)
+    else {
+      const users = busy.users.filter(u => u.cores >= 0.05).slice(0, 4).map(u => `${u.user}${u.user === meta.user ? " (this benchmark's proxy and driver)" : ''} ${cores(u.cores)}`)
+      p(`${head} Processes outside the three harnesses' trees used ${cores(busy.otherCoresMedian)} cores at the median between consecutive samples and ${cores(busy.otherCoresPeak)} at the most.${users.length ? ` Averaged over the run, by user: ${users.join(', ')}.` : ''}`)
+    }
+  }
+  p()
   const wrong = turns.filter(l => l.kind === 'turn' && l.timed && !l.correct)
   p('## Wrong or failed answers')
   p()
@@ -263,7 +329,9 @@ export function historyEntry({ analysis, versions, host, runDir }) {
   const summary = Object.fromEntries(Object.entries(analysis.summary).map(([k, v]) => [k, Object.fromEntries(keep.map(x => [x, v[x]]))]))
   const heapOf = r => (r?.kind === 'jvm' ? { usedMedianKb: r.heapUsedMedianKb, usedPeakKb: r.heapUsedPeakKb, committedMedianKb: r.heapCommittedMedianKb, committedPeakKb: r.heapCommittedPeakKb } : undefined)
   const memory = analysis.memory && Object.fromEntries(Object.entries(analysis.memory).map(([h, m]) => [h, m && { measure: m.measure, startKb: m.startKb, medianKb: m.medianKb, peakKb: m.peakKb, endKb: m.endKb, heap: heapOf(m.runtime) }]))
-  return { at: analysis.meta.at, host, model: analysis.meta.model ?? config.model, runDir, versions, summary, memory }
+  const b = analysis.host
+  const hostLoad = b ? { cpus: b.cpus, load1Median: b.load1Median, load1Peak: b.load1Peak, otherCoresMedian: b.otherCoresMedian, otherCoresPeak: b.otherCoresPeak } : undefined
+  return { at: analysis.meta.at, host, model: analysis.meta.model ?? config.model, runDir, versions, summary, memory, ownSamples: ownSamplesOf(analysis.rows), hostLoad }
 }
 
 if (isMain(import.meta.url)) {

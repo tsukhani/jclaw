@@ -9,8 +9,8 @@ import { compareMemory, historyEntry, render } from '../src/report.mjs'
 const MiB = 1024
 const H = ['jclaw', 'openclaw', 'hermes']
 
-test('reads the name and parent from a stat line whose name holds spaces and parentheses', () => {
-  assert.deepEqual(parseStat('4242 (python3 (side) x) S 4200 4242 4242 0 -1 4194560 120 0 0 0'), { name: 'python3 (side) x', ppid: 4200 })
+test('reads the name, the parent and its CPU ticks with its reaped children\'s from a stat line whose name holds spaces and parentheses', () => {
+  assert.deepEqual(parseStat('4242 (python3 (side) x) S 4200 4242 4242 0 -1 4194560 120 0 0 0 350 41 7 2 20 0 1 0 9000'), { name: 'python3 (side) x', ppid: 4200, ticks: 400 })
 })
 
 test('names a process by the script an interpreter runs, else by its program or the title it gave itself', () => {
@@ -128,7 +128,7 @@ function reportOf(lines, history = [], node) {
   return { analysis, text: render({ analysis, conformance: { pass: true, results: [] }, versions, turns: lines, history, host: 'testhost' }) }
 }
 const meta = () => ({ kind: 'meta', at: '2026-11-25T00:00:00.000Z', runs: 1, tasks: ['question'], harnesses: H, model: 'm' })
-const section = (text) => text.slice(text.indexOf('## Memory'), text.indexOf('## Wrong'))
+const section = (text) => text.slice(text.indexOf('## Memory'), text.indexOf('## Host'))
 
 test('the report shows each harness\'s memory, names a harness measured in RSS, and says when none was measured', () => {
   const { text } = reportOf([meta(), ...samples])

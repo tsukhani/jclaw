@@ -21,6 +21,35 @@ export function quantile(a, p) {
   return s[lo] + (s[Math.ceil(i)] - s[lo]) * (i - lo)
 }
 
+/** Two-sided Mann–Whitney U test by the normal approximation, corrected for ties, without a continuity correction. */
+export function mannWhitney(x, y) {
+  const all = [...x.map(v => [v, 0]), ...y.map(v => [v, 1])].sort((a, b) => a[0] - b[0])
+  const n1 = x.length
+  const n = all.length
+  let r1 = 0
+  let ties = 0
+  for (let i = 0; i < n;) {
+    let j = i
+    while (j + 1 < n && all[j + 1][0] === all[i][0]) j++
+    const rank = (i + j) / 2 + 1
+    for (let k = i; k <= j; k++) if (all[k][1] === 0) r1 += rank
+    ties += (j - i + 1) ** 3 - (j - i + 1)
+    i = j + 1
+  }
+  const n2 = n - n1
+  const sigma = Math.sqrt((n1 * n2 / 12) * (n + 1 - ties / (n * (n - 1))))
+  if (!(sigma > 0)) return 1
+  const z = Math.abs(r1 - n1 * (n1 + 1) / 2 - n1 * n2 / 2) / sigma
+  return Math.min(1, 2 * (1 - normalCdf(z)))
+}
+
+// Abramowitz and Stegun 26.2.17, for z ≥ 0, within 7.5e-8.
+function normalCdf(z) {
+  const t = 1 / (1 + 0.2316419 * z)
+  const poly = t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
+  return 1 - Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI) * poly
+}
+
 export function unionMs(iv) {
   const s = iv.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0])
   let total = 0
@@ -125,7 +154,7 @@ export function analyze(lines, proxy) {
       }
     }
   }
-  return { meta, rows, summary, background, memory: summarizeMemory(lines, meta.harnesses) }
+  return { meta, rows, summary, background, memory: summarizeMemory(lines, meta.harnesses), host: summarizeHost(lines) }
 }
 
 /**
@@ -154,6 +183,34 @@ export function summarizeMemory(lines, harnesses) {
     }
   }
   return out
+}
+
+/**
+ * How busy the host was, from the samples taken with memory: the 1-minute load average, and on Linux the cores that
+ * processes outside the harnesses' trees used between two samples, with each user's average over the run. Null for a
+ * run with no host samples.
+ */
+export function summarizeHost(lines) {
+  const hs = lines.filter(l => l.kind === 'memory' && l.host).map(l => l.host)
+  if (!hs.length) return null
+  const load = hs.map(h => h.load1)
+  const out = { cpus: hs[0].cpus, load1Median: quantile(load, 0.5), load1Peak: Math.max(...load), otherCoresMedian: null, otherCoresPeak: null, users: [] }
+  const ticked = hs.filter(h => h.totalTicks != null)
+  const other = []
+  const byUser = {}
+  let total = 0
+  for (let i = 1; i < ticked.length; i++) {
+    const [a, b] = [ticked[i - 1], ticked[i]]
+    const dt = b.totalTicks - a.totalTicks
+    if (dt <= 0) continue
+    total += dt
+    other.push(Math.max(0, b.busyTicks - a.busyTicks - (b.harnessTicks - a.harnessTicks)) / dt * b.cpus)
+    // A reaped process's ticks move to its parent, so a user's sum falls when another user's process reaps one of its.
+    for (const [u, t] of Object.entries(b.byUser)) byUser[u] = (byUser[u] ?? 0) + Math.max(0, t - (a.byUser[u] ?? 0))
+  }
+  if (!other.length) return out
+  const users = Object.entries(byUser).map(([user, t]) => ({ user, cores: t / total * out.cpus })).sort((a, b) => b.cores - a.cores)
+  return { ...out, otherCoresMedian: quantile(other, 0.5), otherCoresPeak: Math.max(...other), users }
 }
 
 // What the harness itself reports about its memory, so far only JClaw's JVM heap; null when it reported nothing.
