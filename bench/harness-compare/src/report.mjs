@@ -12,8 +12,9 @@ import { mannWhitney, readJsonl, quantile } from './analyze.mjs'
 
 export const MARKED_SHARE = 0.2
 // Per task, a uniform 20% slowdown of JClaw's own time cleared MARKED_SHARE with the ranges apart in 4 of 20 pairs of
-// five identical runs; across tasks, a 10% line caught it in all 20 and marked none of the identical pairs (2026-11-25).
-// A 20% line there would catch a real 20% slowdown only half the time.
+// five identical runs; across tasks, a 10% line caught it in all 20 and marked none of the identical pairs, nor any of
+// the 18 pairs with three later daytime runs it was not set on (2026-11-25). A 20% line there would catch a real 20%
+// slowdown only half the time.
 export const ACROSS_SHARE = 0.1
 export const ACROSS_P = 0.01
 const N = { jclaw: 'JClaw', openclaw: 'OpenClaw', hermes: 'Hermes' }
@@ -199,7 +200,7 @@ export function render({ analysis, conformance, versions, turns, history, host }
       else {
         for (const c of across) p(`- **Worth a look:** ${N[c.harness]}'s own time moved ${c.shift > 0 ? '+' : ''}${Math.round(c.shift * 100)}% across its ${c.tasks} tasks, the median of their changes (Mann–Whitney ${pText(c.p)} over ${c.n[0]} turns then and ${c.n[1]} now).${busyNote(base.hostLoad, busy)}`)
         p()
-        p(`A move across tasks is a first sign, not proof of a slowdown: its ${ACROSS_SHARE * 100}% line was set on five identical runs from one quiet night, between which it moved by 6.3% at most.`)
+        p(`A move across tasks is a first sign, not proof of a slowdown: its ${ACROSS_SHARE * 100}% line was set on five identical runs from one quiet night. Across those and three more in the daytime it moved by 6.8% at most.`)
       }
       p()
       if (!base.memory || !memory) continue

@@ -73,7 +73,7 @@ test('the report names a harness worth a look with the host then and now, and sa
   const base = entryOf(runOf(1), { hostLoad: busyAt(0.4) })
   assert.deepEqual(changes(reportOf(runOf(1.2), [base], busyAt(9.6))).slice(2), [
     "- **Worth a look:** JClaw's own time moved +20% across its 8 tasks, the median of their changes (Mann–Whitney p below 0.0001 over 120 turns then and 120 now). Outside the harnesses the host used a median of 0.4 cores then and 9.6 now, of 48.",
-    'A move across tasks is a first sign, not proof of a slowdown: its 10% line was set on five identical runs from one quiet night, between which it moved by 6.3% at most.',
+    'A move across tasks is a first sign, not proof of a slowdown: its 10% line was set on five identical runs from one quiet night. Across those and three more in the daytime it moved by 6.8% at most.',
   ])
   assert.equal(changes(reportOf(runOf(1.2), [{ ...base, hostLoad: undefined }], busyAt(9.6)))[2].endsWith(' Outside the harnesses the host used a median of 9.6 of its 48 cores; that run did not record it.'), true)
   assert.deepEqual(changes(reportOf(runOf(1), [base], busyAt(0.4))).slice(2), ["No harness's own time moved by 10% or more across its tasks with a rank test p below 0.01."])
