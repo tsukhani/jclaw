@@ -27,6 +27,9 @@ const ERROR = 2
 // Spec conformance only: the recommended and document presets add style and SRI rules Nuxt's own markup breaks.
 const validator = new HtmlValidate(new StaticConfigLoader({ extends: ['html-validate:standard'] }))
 
+// Code-unit order, not localeCompare: the report must list files the same way whatever the machine's locale.
+const byCodeUnit = (a: string, b: string): number => Number(a > b) - Number(a < b)
+
 function locate(text: string, offset: number): { line: number, column: number } {
   const before = text.slice(0, offset)
   return { line: before.split('\n').length, column: offset - before.lastIndexOf('\n') }
@@ -42,11 +45,11 @@ export function sharedFiles(routes: PrerenderedRoute[]): HtmlProblem[] {
   }
   return [...writers]
     .filter(([, by]) => by.length > 1)
-    .sort(([a], [b]) => Number(a > b) - Number(a < b))
+    .sort(([a], [b]) => byCodeUnit(a, b))
     .map(([file, by]) => ({
       file,
       rule: ONE_ROUTE_PER_FILE,
-      message: `written by ${by.length} prerendered routes at once: ${by.sort().join(', ')}`,
+      message: `written by ${by.length} prerendered routes at once: ${by.toSorted(byCodeUnit).join(', ')}`,
     }))
 }
 
@@ -55,8 +58,9 @@ export async function findHtmlProblems(publicDir: string): Promise<HtmlProblem[]
   const files = (await readdir(publicDir, { recursive: true, withFileTypes: true }))
     .filter(entry => entry.isFile() && entry.name.endsWith('.html'))
     .map(entry => relative(publicDir, join(entry.parentPath, entry.name)).replaceAll('\\', '/'))
-    .sort()
+    .sort(byCodeUnit)
   const problems: HtmlProblem[] = []
+  // One page at a time: validation is CPU work on this thread, so checking the 24 pages together saved 4 ms of 50 (2026-11-25).
   for (const file of files) {
     const html = await readFile(join(publicDir, file), 'utf8')
     // HTML parsing folds content after </html> back into the body, so the validator alone passes a tail with no duplicate id.
@@ -110,7 +114,10 @@ export function failureReason(problems: HtmlProblem[]): string {
 function failureMessage(problems: HtmlProblem[]): string {
   const lines = [
     'The built web app failed its HTML check, so the build stopped before anything could serve it:',
-    ...problems.map(p => `  ${p.file}${p.line ? `:${p.line}:${p.column}` : ''}: ${p.message} [${p.rule}]`),
+    ...problems.map((p) => {
+      const at = p.line ? `:${p.line}:${p.column}` : ''
+      return `  ${p.file}${at}: ${p.message} [${p.rule}]`
+    }),
   ]
   if (problems.some(p => p.rule === ONE_ROUTE_PER_FILE || p.rule === ONE_DOCUMENT)) {
     lines.push('Prerendered routes that share a file are written at the same moment, and the shorter write lands over the start '
