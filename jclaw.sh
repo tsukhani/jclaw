@@ -5708,6 +5708,12 @@ do_e2e() {
 
 # ─── Consolidated test runner ───
 
+# The classes in autotest log $2 whose status matches the ERE $1. FirePhoque prints one line per class,
+# "~ <class>... PASSED", "FAILED  !" or "ERROR   ?": anchored to that shape, Gradle's "BUILD FAILED in" is no class.
+autotest_class_count() {
+    grep -cE "^~ .+\.\.\. +($1) " "$2" 2>/dev/null || true
+}
+
 # Runs the pre-push validation suite: backend tests (play autotest),
 # frontend tests (pnpm test), and frontend quality gates (stylelint, lint,
 # typecheck). Streams each check's output and prints a consolidated summary
@@ -5846,8 +5852,9 @@ do_test() {
     # Extract human-readable counts for the summary. Each grep is shielded
     # with `|| true` so a missing match under `set -e` + `pipefail` doesn't
     # tank the whole function before we get to print the verdict.
-    backend_passed=$(grep -cE "PASSED " "$backend_log" 2>/dev/null || true)
-    backend_failed=$(grep -cE "FAILED " "$backend_log" 2>/dev/null || true)
+    backend_passed=$(autotest_class_count PASSED "$backend_log")
+    # ERROR is a class that left no result, such as one that hung: it did not pass either.
+    backend_failed=$(autotest_class_count 'FAILED|ERROR' "$backend_log")
     # Vitest emits ANSI color escapes even when teed to a file, so strip them
     # once before line-anchored matching. Pull files count, tests count, and
     # Vitest's self-reported Duration so the summary tracks what the user saw
