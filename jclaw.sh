@@ -4276,7 +4276,8 @@ do_start_prod() {
 # becomes invisible to the pidfile path AND to port checks once its HTTP
 # listener dies — it survived 11.5h of restarts, leaking a db-scheduler
 # generation per dev reload. Sweep by process signature instead: every Play
-# JVM carries -Dapplication.path=<project dir> on its command line.
+# server carries -Dapplication.path=<project dir> and the main class
+# play.server.Server on its command line.
 kill_orphan_jvms() {
     # Git Bash ships no pgrep and Windows offers no cheap command-line match, so
     # the signature sweep is skipped there rather than reporting "no orphans".
@@ -4287,6 +4288,8 @@ kill_orphan_jvms() {
         cmd=$(ps -o command= -p "$pid" 2>/dev/null || true)
         # The whole argument, as a string: a substring or pattern match on .../jclaw also takes .../jclaw-old (JCLAW-1436).
         [[ " $cmd " == *" -Dapplication.path=$SCRIPT_DIR "* ]] || continue
+        # The fork puts that path on every JVM it starts, FirePhoque and playEvolutions among them: killing one fails that run.
+        [[ " $cmd " == *" play.server.Server "* ]] || continue
         # A test server (play autotest, including the pre-push suite) carries the same path but is live: killing it fails the run.
         case "$cmd" in
             *-Dplay.id=test*) continue ;;
