@@ -316,8 +316,10 @@ class PlaywrightToolTest extends UnitTest {
 
     @Test
     void navigateToAnUnresolvableHostIsRefusedBeforeAnyBrowserStarts() {
-        var result = new PlaywrightBrowserTool().execute(navigateTo("http://nonexistent-host-jclaw-1277.invalid/"), agent);
-        assertTrue(result.startsWith("Error: SSRF guard: cannot resolve host"), result);
+        var host = "nonexistent-host-jclaw-1277.invalid";
+        var result = SsrfGuard.callWithUnknownHostsForTest(Set.of(host),
+                () -> new PlaywrightBrowserTool().execute(navigateTo("http://" + host + "/"), agent));
+        assertEquals("Error: SSRF guard: cannot resolve host: " + host, result);
     }
 
     @Test
@@ -869,15 +871,20 @@ class PlaywrightToolTest extends UnitTest {
     @Test
     void theRouteLogsAHostThatDoesNotResolveAsInfo() {
         Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
-        var target = "http://nonexistent-host-jclaw-1280.invalid/pixel";
+        var host = "nonexistent-host-jclaw-1280.invalid";
+        var target = "http://" + host + "/pixel";
         try (var playwright = PlaywrightBrowserTool.startDriver().playwright()) {
             var context = JevRunTest.launchOrSkip(playwright).newContext();
             var lines = new CopyOnWriteArrayList<String>();
             PlaywrightBrowserTool.screen(context, sinkLog(lines));
             var failed = new CopyOnWriteArrayList<String>();
             context.onRequestFailed(request -> failed.add(request.url()));
-            context.newPage().navigate("data:text/html,<img src=\"" + target + "\">");
-            context.waitForCondition(() -> failed.contains(target));
+            // Playwright runs the route handler on the thread that calls into it, so the binding reaches its lookup.
+            SsrfGuard.callWithUnknownHostsForTest(Set.of(host), () -> {
+                context.newPage().navigate("data:text/html,<img src=\"" + target + "\">");
+                context.waitForCondition(() -> failed.contains(target));
+                return null;
+            });
             assertEquals(List.of("INFO Browser refused a request to host nonexistent-host-jclaw-1280.invalid"), lines,
                     "a refusal that is not a blocked address is not a warning");
         }

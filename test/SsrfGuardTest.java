@@ -10,6 +10,7 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -221,6 +222,20 @@ class SsrfGuardTest extends UnitTest {
     }
 
     @Test
+    void theSafeDnsAnswersAHostListedAsUnknownInAnyCaseWithUnknownHost() {
+        var ex = SsrfGuard.callWithUnknownHostsForTest(Set.of("No-Such-Host.INVALID"), () -> assertThrows(
+                UnknownHostException.class, () -> SsrfGuard.SAFE_DNS.lookup("no-such-host.invalid")));
+        assertEquals("no-such-host.invalid", ex.getMessage());
+    }
+
+    @Test
+    void aHostNotAnsweredAsUnknownResolvesAsBefore() {
+        var pinned = SsrfGuard.callWithHostsForTest(EXAMPLE_COM, () -> SsrfGuard.callWithUnknownHostsForTest(
+                Set.of("no-such-host.invalid"), () -> SsrfGuard.pinnedUrl("https://example.com/")));
+        assertEquals("93.184.215.14", URI.create(pinned).getHost());
+    }
+
+    @Test
     void isUrlSafeNonThrowingReturnsFalseForUnsafe() {
         // Hot-path variant used by route interceptors — never throws.
         assertFalse(SsrfGuard.isUrlSafe("http://127.0.0.1/"));
@@ -423,8 +438,10 @@ class SsrfGuardTest extends UnitTest {
 
     @Test
     void aRefusalForAnyOtherReasonIsAPlainSecurityException() {
-        assertThrowsExactly(SecurityException.class,
-                () -> SsrfGuard.assertUrlSafe("http://nonexistent-host-jclaw-1280.invalid/"), "a host that does not resolve");
+        var host = "nonexistent-host-jclaw-1280.invalid";
+        var unresolved = SsrfGuard.callWithUnknownHostsForTest(Set.of(host), () -> assertThrowsExactly(
+                SecurityException.class, () -> SsrfGuard.assertUrlSafe("http://" + host + "/"), "a host that does not resolve"));
+        assertEquals("SSRF guard: cannot resolve host: " + host, unresolved.getMessage());
         assertThrowsExactly(SecurityException.class,
                 () -> SsrfGuard.assertUrlSafe("http://user@example.com/"), "userinfo");
         assertThrowsExactly(SecurityException.class,

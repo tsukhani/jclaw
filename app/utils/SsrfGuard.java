@@ -17,6 +17,7 @@ import java.net.SocketException;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -147,8 +148,28 @@ public final class SsrfGuard {
         return ScopedValue.where(TEST_HOSTS, Map.copyOf(table)).call(body);
     }
 
-    /** {@link InetAddress#getAllByName}, answered from {@link #callWithHostsForTest}'s table when one is bound. */
+    /** The hostnames {@link #callWithUnknownHostsForTest} answers as unknown on the binding thread; never bound in production. */
+    private static final ScopedValue<Set<String>> TEST_UNKNOWN_HOSTS = ScopedValue.newInstance();
+
+    /**
+     * Test seam: run {@code body} with each hostname in {@code hosts} failing to resolve on this thread
+     * only, as a name with no DNS record does, without asking a resolver: one that never answers a
+     * {@code .invalid} name holds the lookup for its whole timeout, 30 s on the Mac JF-617 measured.
+     * Unlisted names resolve as usual. {@code CapabilityRulesTest} fails the build if anything in
+     * {@code app/} calls it.
+     */
+    public static <T, X extends Throwable> T callWithUnknownHostsForTest(
+            @NonNull Set<String> hosts, ScopedValue.@NonNull CallableOp<T, X> body) throws X {
+        var names = new HashSet<String>();
+        hosts.forEach(host -> names.add(host.toLowerCase(Locale.ROOT)));
+        return ScopedValue.where(TEST_UNKNOWN_HOSTS, Set.copyOf(names)).call(body);
+    }
+
+    /** {@link InetAddress#getAllByName}, answered from the test seams' tables when one is bound. */
     private static InetAddress[] allByName(String host) throws UnknownHostException {
+        if (TEST_UNKNOWN_HOSTS.isBound() && TEST_UNKNOWN_HOSTS.get().contains(host.toLowerCase(Locale.ROOT))) {
+            throw new UnknownHostException(host);
+        }
         if (TEST_HOSTS.isBound()) {
             var pinned = TEST_HOSTS.get().get(host.toLowerCase(Locale.ROOT));
             if (pinned != null) return new InetAddress[] {pinned};

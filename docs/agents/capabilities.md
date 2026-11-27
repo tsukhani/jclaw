@@ -9,12 +9,14 @@ up an authority it was never granted fails `play autotest` with a `because` clau
 naming the capability.
 
 **Test-only seams** are the mirror image of a capability, and `CapabilityRulesTest`
-holds them too: twenty-two methods `app/` may never call, enforced by
+holds them too: twenty-five methods `app/` may never call, enforced by
 `noAppClassCallsATestOnlySeam`, with `everyScopedValueSeamInAppIsOnTheList` failing the build on a
 `public static *ForTest` method that binds a `ScopedValue` and is not on it. Each binds a `ScopedValue` for the dynamic extent of
 one call — `SsrfGuard.permitOriginForTest` (any http(s) IP-literal origin, so a
 loopback fixture passes the SSRF check), `SsrfGuard.callWithHostsForTest` (hostnames
 answered from IP literals instead of DNS, so the public-host paths run without a resolver),
+`SsrfGuard.callWithUnknownHostsForTest` (hostnames that fail to resolve without asking a resolver, which
+on some networks never answers a `.invalid` name and holds the lookup 30 s, JF-617),
 `JevPage.callWithCallLimitForTest` (any
 positive frozen-page bound, in place of the 30 s default), `McpElicitations.callWithWaitForTest`
 (any positive wait before an unanswered MCP form is cancelled, in place of 5 minutes), `HttpFactories.runWith` /
