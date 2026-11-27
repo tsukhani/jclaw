@@ -866,9 +866,13 @@ const renderedMarkdown = computed(() => {
 // The viewer follows the route and the file list; a slow load for the previous skill or file
 // must not land in the current one.
 const viewerLoads = useLatestRequest()
+// The body below the back row waits for the listing: the cards above the Files panel come with it, and a
+// panel painted first was pushed down 314 px when they landed (CLS 0.1243 on 4 of 15 loads).
+const viewerLoaded = ref(false)
 
 async function editSkill(skill: Skill) {
   const request = viewerLoads.begin()
+  viewerLoaded.value = false
   try {
     const folderName = skill.folderName || skill.name
     editing.value = { ...skill, folderName }
@@ -880,6 +884,7 @@ async function editSkill(skill: Skill) {
     skillTools.value = res.tools || []
     skillCommands.value = res.commands || []
     skillAuthor.value = res.author || ''
+    viewerLoaded.value = true
 
     // Auto-select SKILL.md
     const skillMd = skillFiles.value.find(f => f.path === 'SKILL.md')
@@ -896,6 +901,7 @@ async function editSkill(skill: Skill) {
   }
   catch (e) {
     console.error('Failed to load skill:', e)
+    if (viewerLoads.isCurrent(request)) viewerLoaded.value = true
   }
 }
 
@@ -1028,6 +1034,7 @@ async function reloadSkillsOf(agentId: number | null) {
 
 async function editAgentSkill(agentId: number, skill: AgentSkill) {
   const request = viewerLoads.begin()
+  viewerLoaded.value = false
   try {
     const name = (skill.folderName as string) || skill.name
     editing.value = { ...skill, folderName: name }
@@ -1039,6 +1046,7 @@ async function editAgentSkill(agentId: number, skill: AgentSkill) {
     skillTools.value = res.tools || []
     skillCommands.value = res.commands || []
     skillAuthor.value = res.author || ''
+    viewerLoaded.value = true
 
     const skillMd = skillFiles.value.find(f => f.path === 'SKILL.md')
     if (skillMd) {
@@ -1054,6 +1062,7 @@ async function editAgentSkill(agentId: number, skill: AgentSkill) {
   }
   catch (e) {
     console.error('Failed to load agent skill:', e)
+    if (viewerLoads.isCurrent(request)) viewerLoaded.value = true
   }
 }
 
@@ -1684,240 +1693,242 @@ function totalSkillCount(agentId: number) {
         </button>
       </div>
 
-      <!-- Skill header -->
-      <div class="bg-surface-elevated border border-border px-4 py-3">
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/40 rounded flex items-center justify-center">
-            <FolderIcon
-              class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
+      <template v-if="viewerLoaded">
+        <!-- Skill header -->
+        <div class="bg-surface-elevated border border-border px-4 py-3">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/40 rounded flex items-center justify-center">
+              <FolderIcon
+                class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
+                aria-hidden="true"
+              />
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-medium text-fg-strong font-mono">{{ editing.folderName || editing.name }}</span>
+                <span
+                  v-if="editingAgentId != null"
+                  class="text-xs text-blue-700 dark:text-blue-400 border border-blue-400/30 px-1"
+                >
+                  {{ agents?.find((a: any) => a.id === editingAgentId)?.name ?? 'agent' }}
+                </span>
+                <span
+                  v-if="editingNeedsValues.length"
+                  class="text-xs text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1"
+                  data-testid="viewer-not-runnable"
+                >Not runnable</span>
+                <span
+                  v-else
+                  class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+                >global</span>
+              </div>
+              <div class="text-xs text-fg-muted">
+                {{ skillFiles.length }} file{{ skillFiles.length !== 1 ? 's' : '' }}
+                <span
+                  v-if="skillAuthor"
+                  class="ml-2"
+                >
+                  · by <span class="font-mono text-fg-muted">{{ skillAuthor }}</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tool dependencies -->
+        <div
+          v-if="skillTools.length"
+          class="bg-surface-elevated border border-border px-4 py-3"
+        >
+          <div class="flex items-center gap-2 mb-3">
+            <Cog6ToothIcon
+              class="w-4 h-4 text-amber-700 dark:text-amber-400"
               aria-hidden="true"
             />
+            <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Required Tools</span>
           </div>
-          <div>
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-medium text-fg-strong font-mono">{{ editing.folderName || editing.name }}</span>
-              <span
-                v-if="editingAgentId != null"
-                class="text-xs text-blue-700 dark:text-blue-400 border border-blue-400/30 px-1"
-              >
-                {{ agents?.find((a: any) => a.id === editingAgentId)?.name ?? 'agent' }}
-              </span>
-              <span
-                v-if="editingNeedsValues.length"
-                class="text-xs text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1"
-                data-testid="viewer-not-runnable"
-              >Not runnable</span>
-              <span
-                v-else
-                class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
-              >global</span>
-            </div>
-            <div class="text-xs text-fg-muted">
-              {{ skillFiles.length }} file{{ skillFiles.length !== 1 ? 's' : '' }}
-              <span
-                v-if="skillAuthor"
-                class="ml-2"
-              >
-                · by <span class="font-mono text-fg-muted">{{ skillAuthor }}</span>
-              </span>
-            </div>
+          <div class="flex flex-wrap gap-2">
+            <span
+              v-for="tool in skillTools"
+              :key="tool.name"
+              class="inline-flex items-center px-2.5 py-1 border rounded text-xs font-mono leading-none"
+              :class="getPillClass(tool.name)"
+            >
+              {{ tool.name }}
+            </span>
           </div>
         </div>
-      </div>
 
-      <!-- Tool dependencies -->
-      <div
-        v-if="skillTools.length"
-        class="bg-surface-elevated border border-border px-4 py-3"
-      >
-        <div class="flex items-center gap-2 mb-3">
-          <Cog6ToothIcon
-            class="w-4 h-4 text-amber-700 dark:text-amber-400"
-            aria-hidden="true"
-          />
-          <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Required Tools</span>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <span
-            v-for="tool in skillTools"
-            :key="tool.name"
-            class="inline-flex items-center px-2.5 py-1 border rounded text-xs font-mono leading-none"
-            :class="getPillClass(tool.name)"
-          >
-            {{ tool.name }}
-          </span>
-        </div>
-      </div>
-
-      <!--
+        <!--
         Shell commands this skill contributes to an installing agent's
         effective allowlist (from the `jclaw-commands` frontmatter). Rendered below
         Required Tools because tools are the dependencies the skill consumes
         while commands are the binaries it *provides* — consume-before-provide
         matches the reading order a reviewer uses to trust the skill.
       -->
-      <div
-        v-if="skillCommands.length"
-        class="bg-surface-elevated border border-border px-4 py-3"
-      >
-        <div class="flex items-center gap-2 mb-3">
-          <CommandLineIcon
-            class="w-4 h-4 text-cyan-700 dark:text-cyan-400"
-            aria-hidden="true"
-          />
-          <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Commands</span>
-          <span class="text-xs text-fg-muted normal-case tracking-normal">
-            added to the agent's shell allowlist when this skill is installed
-          </span>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <span
-            v-for="cmd in skillCommands"
-            :key="cmd"
-            class="inline-flex items-center px-2.5 py-1 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800/40 rounded text-xs font-mono text-cyan-700 dark:text-cyan-300 leading-none"
-          >
-            {{ cmd }}
-          </span>
-        </div>
-      </div>
-
-      <SkillSecretsPanel
-        v-if="editingAgentId != null"
-        ref="secretsPanel"
-        :agent-id="editingAgentId"
-        :skill-name="editing.folderName || editing.name"
-        @changed="reloadSkillsOf(editingAgentId)"
-      />
-      <!-- What SKILL.md and its references cost an agent's conversation once read. -->
-      <div
-        v-if="contextFiles.length"
-        class="bg-surface-elevated border border-border px-4 py-3"
-      >
-        <div class="flex items-center gap-2 mb-3">
-          <DocumentTextIcon
-            class="w-4 h-4 text-violet-700 dark:text-violet-400"
-            aria-hidden="true"
-          />
-          <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Context size</span>
-          <span class="text-xs text-fg-muted normal-case tracking-normal">
-            what each file adds to a conversation once the agent reads it
-          </span>
-        </div>
         <div
-          ref="contextSizeScroller"
-          class="overflow-x-auto"
+          v-if="skillCommands.length"
+          class="bg-surface-elevated border border-border px-4 py-3"
         >
-          <table class="text-xs">
-            <thead>
-              <tr class="text-fg-muted">
-                <th class="text-left font-medium pr-6 pb-1">
-                  File
-                </th>
-                <th class="text-right font-medium pr-6 pb-1">
-                  Characters
-                </th>
-                <th class="text-right font-medium pb-1">
-                  Est. tokens
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="f in contextFiles"
-                :key="f.path"
-              >
-                <td class="font-mono text-fg-strong pr-6 py-0.5">
-                  {{ f.path }}
-                  <span
-                    v-if="f.path === 'SKILL.md' && f.chars! > SKILL_MD_LIMIT_CHARS"
-                    class="ml-2 font-sans text-amber-700 dark:text-amber-400"
-                  >over the {{ SKILL_MD_LIMIT_CHARS.toLocaleString('en-US') }}-character limit</span>
-                </td>
-                <td class="text-right tabular-nums pr-6 py-0.5">
-                  {{ f.chars!.toLocaleString('en-US') }}
-                </td>
-                <td class="text-right tabular-nums py-0.5">
-                  ~{{ (f.estimatedTokens ?? 0).toLocaleString('en-US') }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div
-        class="flex max-sm:flex-col gap-4"
-        style="min-height: 500px;"
-      >
-        <!-- File sidebar -->
-        <div class="w-52 max-sm:w-full shrink-0 bg-surface-elevated border border-border overflow-y-auto">
-          <div class="px-3 py-2 border-b border-border">
-            <span class="text-[10px] font-medium text-fg-muted uppercase tracking-wider">Files</span>
+          <div class="flex items-center gap-2 mb-3">
+            <CommandLineIcon
+              class="w-4 h-4 text-cyan-700 dark:text-cyan-400"
+              aria-hidden="true"
+            />
+            <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Commands</span>
+            <span class="text-xs text-fg-muted normal-case tracking-normal">
+              added to the agent's shell allowlist when this skill is installed
+            </span>
           </div>
-          <SkillFileTree
-            :nodes="fileTree"
-            :active-path="activeFile"
-            @select="selectFile"
-          />
+          <div class="flex flex-wrap gap-2">
+            <span
+              v-for="cmd in skillCommands"
+              :key="cmd"
+              class="inline-flex items-center px-2.5 py-1 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800/40 rounded text-xs font-mono text-cyan-700 dark:text-cyan-300 leading-none"
+            >
+              {{ cmd }}
+            </span>
+          </div>
         </div>
 
-        <!-- File editor -->
-        <div class="flex-1 flex flex-col bg-surface-elevated border border-border min-w-0">
-          <template v-if="activeFile">
-            <div class="px-4 py-2 border-b border-border flex max-sm:flex-wrap items-center gap-2">
-              <span class="text-xs font-mono text-fg-muted max-sm:min-w-0 max-sm:truncate">{{ activeFile }}</span>
-              <span class="text-xs text-fg-muted">(read-only — edit via skill-creator)</span>
-              <div
-                v-if="isMarkdownFile"
-                class="ml-auto flex items-center gap-0.5"
-              >
-                <button
-                  :class="fileViewMode === 'rendered' ? 'text-fg-strong bg-muted' : 'text-fg-muted hover:text-fg-strong'"
-                  class="p-1 rounded transition-colors"
-                  title="Rendered markdown"
-                  @click="fileViewMode = 'rendered'"
-                >
-                  <DocumentTextIcon
-                    class="w-3.5 h-3.5"
-                    aria-hidden="true"
-                  />
-                </button>
-                <button
-                  :class="fileViewMode === 'raw' ? 'text-fg-strong bg-muted' : 'text-fg-muted hover:text-fg-strong'"
-                  class="p-1 rounded transition-colors"
-                  title="Raw text"
-                  @click="fileViewMode = 'raw'"
-                >
-                  <CodeBracketIcon
-                    class="w-3.5 h-3.5"
-                    aria-hidden="true"
-                  />
-                </button>
-              </div>
-            </div>
-            <!-- eslint-disable vue/no-v-html -- renderedMarkdown runs the file through DOMPurify.sanitize (see computed above) before returning. -->
-            <div
-              v-if="isMarkdownFile && fileViewMode === 'rendered'"
-              class="prose-skill flex-1 overflow-y-auto px-6 py-4 text-sm text-fg-primary"
-              v-html="renderedMarkdown"
+        <SkillSecretsPanel
+          v-if="editingAgentId != null"
+          ref="secretsPanel"
+          :agent-id="editingAgentId"
+          :skill-name="editing.folderName || editing.name"
+          @changed="reloadSkillsOf(editingAgentId)"
+        />
+        <!-- What SKILL.md and its references cost an agent's conversation once read. -->
+        <div
+          v-if="contextFiles.length"
+          class="bg-surface-elevated border border-border px-4 py-3"
+        >
+          <div class="flex items-center gap-2 mb-3">
+            <DocumentTextIcon
+              class="w-4 h-4 text-violet-700 dark:text-violet-400"
+              aria-hidden="true"
             />
-            <!-- eslint-enable vue/no-v-html -->
-            <textarea
-              v-else
-              :value="fileContent"
-              readonly
-              aria-label="Skill file contents"
-              class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono resize-none focus:outline-hidden cursor-default opacity-80"
-              spellcheck="false"
-            />
-          </template>
-          <template v-else>
-            <div class="flex-1 flex items-center justify-center text-sm text-fg-muted">
-              Select a file to view
-            </div>
-          </template>
+            <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Context size</span>
+            <span class="text-xs text-fg-muted normal-case tracking-normal">
+              what each file adds to a conversation once the agent reads it
+            </span>
+          </div>
+          <div
+            ref="contextSizeScroller"
+            class="overflow-x-auto"
+          >
+            <table class="text-xs">
+              <thead>
+                <tr class="text-fg-muted">
+                  <th class="text-left font-medium pr-6 pb-1">
+                    File
+                  </th>
+                  <th class="text-right font-medium pr-6 pb-1">
+                    Characters
+                  </th>
+                  <th class="text-right font-medium pb-1">
+                    Est. tokens
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="f in contextFiles"
+                  :key="f.path"
+                >
+                  <td class="font-mono text-fg-strong pr-6 py-0.5">
+                    {{ f.path }}
+                    <span
+                      v-if="f.path === 'SKILL.md' && f.chars! > SKILL_MD_LIMIT_CHARS"
+                      class="ml-2 font-sans text-amber-700 dark:text-amber-400"
+                    >over the {{ SKILL_MD_LIMIT_CHARS.toLocaleString('en-US') }}-character limit</span>
+                  </td>
+                  <td class="text-right tabular-nums pr-6 py-0.5">
+                    {{ f.chars!.toLocaleString('en-US') }}
+                  </td>
+                  <td class="text-right tabular-nums py-0.5">
+                    ~{{ (f.estimatedTokens ?? 0).toLocaleString('en-US') }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+
+        <div
+          class="flex max-sm:flex-col gap-4"
+          style="min-height: 500px;"
+        >
+          <!-- File sidebar -->
+          <div class="w-52 max-sm:w-full shrink-0 bg-surface-elevated border border-border overflow-y-auto">
+            <div class="px-3 py-2 border-b border-border">
+              <span class="text-[10px] font-medium text-fg-muted uppercase tracking-wider">Files</span>
+            </div>
+            <SkillFileTree
+              :nodes="fileTree"
+              :active-path="activeFile"
+              @select="selectFile"
+            />
+          </div>
+
+          <!-- File editor -->
+          <div class="flex-1 flex flex-col bg-surface-elevated border border-border min-w-0">
+            <template v-if="activeFile">
+              <div class="px-4 py-2 border-b border-border flex max-sm:flex-wrap items-center gap-2">
+                <span class="text-xs font-mono text-fg-muted max-sm:min-w-0 max-sm:truncate">{{ activeFile }}</span>
+                <span class="text-xs text-fg-muted">(read-only — edit via skill-creator)</span>
+                <div
+                  v-if="isMarkdownFile"
+                  class="ml-auto flex items-center gap-0.5"
+                >
+                  <button
+                    :class="fileViewMode === 'rendered' ? 'text-fg-strong bg-muted' : 'text-fg-muted hover:text-fg-strong'"
+                    class="p-1 rounded transition-colors"
+                    title="Rendered markdown"
+                    @click="fileViewMode = 'rendered'"
+                  >
+                    <DocumentTextIcon
+                      class="w-3.5 h-3.5"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <button
+                    :class="fileViewMode === 'raw' ? 'text-fg-strong bg-muted' : 'text-fg-muted hover:text-fg-strong'"
+                    class="p-1 rounded transition-colors"
+                    title="Raw text"
+                    @click="fileViewMode = 'raw'"
+                  >
+                    <CodeBracketIcon
+                      class="w-3.5 h-3.5"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
+              </div>
+              <!-- eslint-disable vue/no-v-html -- renderedMarkdown runs the file through DOMPurify.sanitize (see computed above) before returning. -->
+              <div
+                v-if="isMarkdownFile && fileViewMode === 'rendered'"
+                class="prose-skill flex-1 overflow-y-auto px-6 py-4 text-sm text-fg-primary"
+                v-html="renderedMarkdown"
+              />
+              <!-- eslint-enable vue/no-v-html -->
+              <textarea
+                v-else
+                :value="fileContent"
+                readonly
+                aria-label="Skill file contents"
+                class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono resize-none focus:outline-hidden cursor-default opacity-80"
+                spellcheck="false"
+              />
+            </template>
+            <template v-else>
+              <div class="flex-1 flex items-center justify-center text-sm text-fg-muted">
+                Select a file to view
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
     </div>
     <!-- Importable-skills catalog browser (skills.sh / mastra-ai snapshot) -->
     <Teleport to="body">
