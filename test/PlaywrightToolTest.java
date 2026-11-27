@@ -323,6 +323,17 @@ class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
+    void navigateToAHostWhoseLookupGoesUnansweredIsRefusedAtTheBound() {
+        var host = "unanswered-entry-jf619.invalid";
+        long started = System.nanoTime();
+        var result = SsrfGuard.callWithUnansweredHostsForTest(Set.of(host), Duration.ofSeconds(30),
+                () -> new PlaywrightBrowserTool().execute(navigateTo("http://" + host + "/"), agent));
+        long ms = (System.nanoTime() - started) / 1_000_000;
+        assertEquals("Error: SSRF guard: cannot resolve host: " + host + " (no answer within 5 s)", result);
+        assertTrue(ms >= 5_000 && ms < 15_000, "refused at the bound, not when the resolver gives up: took " + ms + " ms");
+    }
+
+    @Test
     void sequentialNavigatesReuseTheSameSession() throws Exception {
         // The session map keys on agent.name; subsequent calls for the same
         // agent must hit the cached BrowserSession path rather than launching
@@ -887,6 +898,32 @@ class PlaywrightToolTest extends UnitTest {
             });
             assertEquals(List.of("INFO Browser refused a request to host nonexistent-host-jclaw-1280.invalid"), lines,
                     "a refusal that is not a blocked address is not a warning");
+        }
+    }
+
+    @Test
+    void aPageWhoseImagesWaitOnAnUnansweredLookupLoadsOnceTheBoundRefusesTheirHost() throws Exception {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var host = "unanswered-image-jf619.invalid";
+        var server = loopbackServer(new AtomicInteger(), Map.of(
+                "/warm", "<!doctype html><title>warm</title><p>warm</p>",
+                "/page", "<!doctype html><title>page</title><img src=\"http://" + host + "/a.png\">"
+                        + "<img src=\"http://" + host + "/b.png\"><p>page</p>"));
+        var origin = origin(server);
+        var tool = new PlaywrightBrowserTool();
+        try {
+            assertEquals("Page: warm\n\nwarm", executeAt(tool, origin, navigateTo(origin + "/warm")),
+                    "the browser starts before the timed navigate");
+            long started = System.nanoTime();
+            var result = SsrfGuard.callWithUnansweredHostsForTest(Set.of(host), Duration.ofSeconds(30),
+                    () -> executeAt(tool, origin, navigateTo(origin + "/page")));
+            long ms = (System.nanoTime() - started) / 1_000_000;
+            assertEquals("Page: page\n\npage\n\nNote: the network guard refused requests to: " + host + ".", result);
+            assertTrue(ms >= 5_000 && ms < 9_000,
+                    "the page waited one bound for the host, not one per image or navigate's 30 s: took " + ms + " ms");
+        } finally {
+            PlaywrightBrowserTool.closeSession(agent.name);
+            server.stop(0);
         }
     }
 

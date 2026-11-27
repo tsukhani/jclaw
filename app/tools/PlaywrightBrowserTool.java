@@ -28,6 +28,7 @@ import utils.AppClock;
 import utils.SsrfGuard;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +58,13 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static final long IDLE_TIMEOUT_MS = 5L * 60 * 1000; // 5 minutes
     private static final ConcurrentHashMap<String, SessionHolder> sessions = new ConcurrentHashMap<>();
     private static final double TAB_WAIT_MS = 5_000;
+    /**
+     * How long a lookup the tool screens with may go unanswered (JF-619). The route runs on the thread
+     * Playwright dispatches on, so a lookup holds the page's every other request too, and a resolver
+     * that drops a query answers only when it gives up, 30 s on macOS, which is navigate's own timeout.
+     * An answered lookup takes well under a second.
+     */
+    private static final Duration LOOKUP_BOUND = Duration.ofSeconds(5);
 
     // Action names dispatched in execute()
     private static final String ACTION_NAVIGATE = "navigate";
@@ -267,7 +275,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         // which also holds the DNS pin.
         if (ACTION_NAVIGATE.equals(action) || ACTION_RUN.equals(action)) {
             try {
-                SsrfGuard.assertUrlSafe(args.get(ARG_URL).getAsString());
+                SsrfGuard.assertUrlSafe(args.get(ARG_URL).getAsString(), LOOKUP_BOUND);
             } catch (SecurityException e) {
                 return "Error: " + e.getMessage();
             }
@@ -352,7 +360,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         // and redirects, but the top-level URL is still checked here so we
         // can surface a clean error to the agent without spinning up the nav.
         try {
-            SsrfGuard.assertUrlSafe(url);
+            SsrfGuard.assertUrlSafe(url, LOOKUP_BOUND);
         } catch (SecurityException e) {
             return "Error: " + e.getMessage();
         }
@@ -639,7 +647,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         context.route("**/*", route -> {
             var url = route.request().url();
             try {
-                SsrfGuard.assertUrlSafe(url);
+                SsrfGuard.assertUrlSafe(url, LOOKUP_BOUND);
             } catch (SecurityException e) {
                 route.abort();
                 log.refused(url, e instanceof SsrfGuard.BlockedAddressException);

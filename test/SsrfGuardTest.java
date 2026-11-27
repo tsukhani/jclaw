@@ -8,6 +8,7 @@ import utils.SsrfGuard;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -233,6 +234,84 @@ class SsrfGuardTest extends UnitTest {
         var pinned = SsrfGuard.callWithHostsForTest(EXAMPLE_COM, () -> SsrfGuard.callWithUnknownHostsForTest(
                 Set.of("no-such-host.invalid"), () -> SsrfGuard.pinnedUrl("https://example.com/")));
         assertEquals("93.184.215.14", URI.create(pinned).getHost());
+    }
+
+    @Test
+    void aLookupWithNoAnswerWithinTheBoundIsRefusedAtTheBound() {
+        var host = "unanswered-bound-jf619.invalid";
+        long started = System.nanoTime();
+        var ex = SsrfGuard.callWithUnansweredHostsForTest(Set.of(host), Duration.ofSeconds(10), () -> assertThrowsExactly(
+                SecurityException.class, () -> SsrfGuard.assertUrlSafe("https://" + host + "/", Duration.ofMillis(200))));
+        long ms = (System.nanoTime() - started) / 1_000_000;
+        assertEquals("SSRF guard: cannot resolve host: " + host + " (no answer within 200 ms)", ex.getMessage());
+        assertTrue(ms >= 200 && ms < 5_000, "refused at the bound, not when the resolver gives up: took " + ms + " ms");
+    }
+
+    @Test
+    void aHostWhoseLookupIsStillUnansweredIsRefusedAtOnce() {
+        var host = "unanswered-again-jf619.invalid";
+        var url = "https://" + host + "/";
+        var second = SsrfGuard.callWithUnansweredHostsForTest(Set.of(host), Duration.ofSeconds(10), () -> {
+            assertThrowsExactly(SecurityException.class, () -> SsrfGuard.assertUrlSafe(url, Duration.ofMillis(200)));
+            long started = System.nanoTime();
+            var ex = assertThrowsExactly(SecurityException.class, () -> SsrfGuard.assertUrlSafe(url, Duration.ofSeconds(5)));
+            long ms = (System.nanoTime() - started) / 1_000_000;
+            assertTrue(ms < 1_000, "the outstanding lookup is not waited for again: took " + ms + " ms");
+            return ex;
+        });
+        assertEquals("SSRF guard: cannot resolve host: " + host + " (no answer within 5 s)", second.getMessage());
+    }
+
+    @Test
+    void aHostIsLookedUpAgainOnceItsUnansweredLookupEnds() throws Exception {
+        var host = "unanswered-ended-jf619.invalid";
+        var url = "https://" + host + "/";
+        var waited = SsrfGuard.callWithUnansweredHostsForTest(Set.of(host), Duration.ofMillis(300), () -> {
+            assertThrowsExactly(SecurityException.class, () -> SsrfGuard.assertUrlSafe(url, Duration.ofMillis(100)));
+            Thread.sleep(800);
+            long started = System.nanoTime();
+            assertThrowsExactly(SecurityException.class, () -> SsrfGuard.assertUrlSafe(url, Duration.ofMillis(100)));
+            return (System.nanoTime() - started) / 1_000_000;
+        });
+        assertTrue(waited >= 100, "the ended lookup no longer refuses the host at once: waited " + waited + " ms");
+    }
+
+    @Test
+    void aHostAnsweredWithinTheBoundIsAccepted() {
+        SsrfGuard.callWithHostsForTest(EXAMPLE_COM, () -> {
+            assertDoesNotThrow(() -> SsrfGuard.assertUrlSafe("https://example.com/", Duration.ofSeconds(1)));
+            return null;
+        });
+    }
+
+    @Test
+    void aBlockedAddressIsRefusedAsBlockedUnderABound() {
+        var ex = SsrfGuard.callWithHostsForTest(Map.of("internal.example", "10.0.0.5"), () -> assertThrowsExactly(
+                SsrfGuard.BlockedAddressException.class,
+                () -> SsrfGuard.assertUrlSafe("https://internal.example/", Duration.ofSeconds(1))));
+        assertEquals("SSRF guard: host internal.example resolves to blocked address 10.0.0.5", ex.getMessage());
+    }
+
+    @Test
+    void aHostThatDoesNotExistIsRefusedAtOnceUnderABound() {
+        var host = "no-such-host-bound.invalid";
+        long started = System.nanoTime();
+        var ex = SsrfGuard.callWithUnknownHostsForTest(Set.of(host), () -> assertThrowsExactly(
+                SecurityException.class, () -> SsrfGuard.assertUrlSafe("https://" + host + "/", Duration.ofSeconds(5))));
+        long ms = (System.nanoTime() - started) / 1_000_000;
+        assertEquals("SSRF guard: cannot resolve host: " + host, ex.getMessage());
+        assertTrue(ms < 2_000, "a name with no record is not waited for: took " + ms + " ms");
+    }
+
+    @Test
+    void withoutABoundAnUnansweredLookupWaitsForTheResolverToGiveUp() {
+        var host = "unanswered-unbounded-jf619.invalid";
+        long started = System.nanoTime();
+        var ex = SsrfGuard.callWithUnansweredHostsForTest(Set.of(host), Duration.ofMillis(300), () -> assertThrowsExactly(
+                SecurityException.class, () -> SsrfGuard.assertUrlSafe("https://" + host + "/")));
+        long ms = (System.nanoTime() - started) / 1_000_000;
+        assertEquals("SSRF guard: cannot resolve host: " + host, ex.getMessage());
+        assertTrue(ms >= 300, "the unbounded call waited for the resolver: took " + ms + " ms");
     }
 
     @Test

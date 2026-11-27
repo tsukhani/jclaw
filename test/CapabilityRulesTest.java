@@ -664,7 +664,8 @@ class CapabilityRulesTest extends UnitTest {
     /** Each seam's owner and methods; a production caller would bind one for everything that follows. */
     private static final Map<String, Set<String>> TEST_SEAMS = Map.ofEntries(
             Map.entry("utils.SsrfGuard",
-                    Set.of("permitOriginForTest", "callWithHostsForTest", "callWithUnknownHostsForTest")),
+                    Set.of("permitOriginForTest", "callWithHostsForTest", "callWithUnknownHostsForTest",
+                            "callWithUnansweredHostsForTest")),
             Map.entry("tools.jev.JevPage", Set.of("callWithCallLimitForTest")),
             Map.entry("mcp.McpElicitations", Set.of("callWithWaitForTest")),
             Map.entry("utils.HttpFactories", Set.of("runWith", "callWith")),

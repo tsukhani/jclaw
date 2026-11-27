@@ -1,5 +1,6 @@
 package utils;
 
+import io.opentelemetry.context.Context;
 import okhttp3.Dns;
 import okhttp3.OkHttpClient;
 import org.jspecify.annotations.NonNull;
@@ -16,6 +17,7 @@ import java.net.SocketAddress;
 import java.net.SocketException;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -23,6 +25,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -165,16 +174,130 @@ public final class SsrfGuard {
         return ScopedValue.where(TEST_UNKNOWN_HOSTS, Set.copyOf(names)).call(body);
     }
 
-    /** {@link InetAddress#getAllByName}, answered from the test seams' tables when one is bound. */
-    private static InetAddress[] allByName(String host) throws UnknownHostException {
-        if (TEST_UNKNOWN_HOSTS.isBound() && TEST_UNKNOWN_HOSTS.get().contains(host.toLowerCase(Locale.ROOT))) {
-            throw new UnknownHostException(host);
+    /** {@link #callWithUnansweredHostsForTest}'s names, and the latch its body's end releases; never bound in production. */
+    private static final ScopedValue<Unanswered> TEST_UNANSWERED_HOSTS = ScopedValue.newInstance();
+
+    private record Unanswered(Set<String> hosts, Duration resolverTimeout, CountDownLatch released) {}
+
+    /**
+     * Test seam: run {@code body} with each hostname in {@code hosts} getting no answer, as from a
+     * resolver that drops the query: its lookup waits until {@code resolverTimeout} passes or
+     * {@code body} returns, then fails as unknown, as the resolver does once it gives up. Unlisted
+     * names resolve as usual. {@code CapabilityRulesTest} fails the build if anything in {@code app/}
+     * calls it.
+     */
+    public static <T, X extends Throwable> T callWithUnansweredHostsForTest(@NonNull Set<String> hosts,
+            @NonNull Duration resolverTimeout, ScopedValue.@NonNull CallableOp<T, X> body) throws X {
+        var names = new HashSet<String>();
+        hosts.forEach(host -> names.add(host.toLowerCase(Locale.ROOT)));
+        var unanswered = new Unanswered(Set.copyOf(names), resolverTimeout, new CountDownLatch(1));
+        try {
+            return ScopedValue.where(TEST_UNANSWERED_HOSTS, unanswered).call(body);
+        } finally {
+            unanswered.released().countDown();
+        }
+    }
+
+    /** A host's address lookup, as the system resolver or a test seam answers it. */
+    @FunctionalInterface
+    private interface Lookup {
+        InetAddress[] run() throws UnknownHostException;
+    }
+
+    /**
+     * The lookup of {@code host}: a test seam's answer when one is bound on this thread, else
+     * {@link InetAddress#getAllByName}. Read on the calling thread, so a bounded lookup that runs on
+     * another still answers as the caller's binding says.
+     */
+    private static Lookup lookupOf(String host) {
+        var name = host.toLowerCase(Locale.ROOT);
+        if (TEST_UNKNOWN_HOSTS.isBound() && TEST_UNKNOWN_HOSTS.get().contains(name)) {
+            return () -> {
+                throw new UnknownHostException(host);
+            };
         }
         if (TEST_HOSTS.isBound()) {
-            var pinned = TEST_HOSTS.get().get(host.toLowerCase(Locale.ROOT));
-            if (pinned != null) return new InetAddress[] {pinned};
+            var pinned = TEST_HOSTS.get().get(name);
+            if (pinned != null) return () -> new InetAddress[] {pinned};
         }
-        return InetAddress.getAllByName(host);
+        if (TEST_UNANSWERED_HOSTS.isBound() && TEST_UNANSWERED_HOSTS.get().hosts().contains(name)) {
+            var unanswered = TEST_UNANSWERED_HOSTS.get();
+            return () -> {
+                try {
+                    unanswered.released().await(unanswered.resolverTimeout().toNanos(), TimeUnit.NANOSECONDS);
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                }
+                throw new UnknownHostException(host);
+            };
+        }
+        return () -> InetAddress.getAllByName(host);
+    }
+
+    private static InetAddress[] allByName(String host) throws UnknownHostException {
+        return lookupOf(host).run();
+    }
+
+    /**
+     * Runs the lookups a caller bounds, so the caller can stop waiting while the lookup goes on: a
+     * resolver call cannot be cut short. A thread is held until the resolver gives up, and
+     * {@link #UNANSWERED} keeps that to one at a time per host.
+     */
+    private static final ExecutorService BOUNDED_LOOKUPS =
+            Executors.newCachedThreadPool(Thread.ofPlatform().daemon().name("ssrf-lookup-", 0).factory());
+
+    /** Ends a bounded lookup's wait: a platform thread, so the wait never takes the ForkJoinPool delay path JDK-8373224 starves. */
+    private static final ScheduledExecutorService LOOKUP_DEADLINES = Executors.newSingleThreadScheduledExecutor(
+            Thread.ofPlatform().daemon().name("ssrf-lookup-deadline").factory());
+
+    /** Lookups still going after their caller's bound passed, by host: a later bounded lookup of the host is refused at once. */
+    private static final Map<String, CompletableFuture<InetAddress[]>> UNANSWERED = new ConcurrentHashMap<>();
+
+    /** A lookup with no answer within its caller's bound. */
+    private static final class UnansweredLookupException extends UnknownHostException {
+        private final transient Duration bound;
+
+        UnansweredLookupException(String host, Duration bound) {
+            super(host + ": no answer within " + format(bound));
+            this.bound = bound;
+        }
+    }
+
+    /** {@link #allByName}, failing with {@link UnansweredLookupException} once {@code bound} passes with no answer. */
+    private static InetAddress[] allByNameWithin(String host, Duration bound) throws UnknownHostException {
+        var name = host.toLowerCase(Locale.ROOT);
+        if (UNANSWERED.containsKey(name)) throw new UnansweredLookupException(host, bound);
+        var lookup = lookupOf(host);
+        var answer = new CompletableFuture<InetAddress[]>();
+        BOUNDED_LOOKUPS.execute(Context.current().wrap(() -> {
+            try {
+                answer.complete(lookup.run());
+            } catch (UnknownHostException | RuntimeException e) {
+                answer.completeExceptionally(e);
+            } finally {
+                UNANSWERED.remove(name, answer);
+            }
+        }));
+        var deadline = LOOKUP_DEADLINES.schedule(() -> {
+            // Listed before the wait is cut, so a lookup ending in between still removes the entry.
+            UNANSWERED.put(name, answer);
+            if (!answer.completeExceptionally(new UnansweredLookupException(host, bound))) {
+                UNANSWERED.remove(name, answer);
+            }
+        }, bound.toNanos(), TimeUnit.NANOSECONDS);
+        try {
+            return answer.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof UnknownHostException unknown) throw unknown;
+            if (e.getCause() instanceof RuntimeException runtime) throw runtime;
+            throw e;
+        } finally {
+            deadline.cancel(false);
+        }
+    }
+
+    private static String format(Duration bound) {
+        return bound.toMillis() % 1000 == 0 ? bound.toSeconds() + " s" : bound.toMillis() + " ms";
     }
 
     /** {@code scheme://host:port}, lower-cased with the default port made explicit, or null without a scheme or host. */
@@ -368,6 +491,23 @@ public final class SsrfGuard {
      *         any resolved-address check.
      */
     public static void assertUrlSafe(@NonNull String url) {
+        checkUrl(url, null);
+    }
+
+    /**
+     * {@link #assertUrlSafe(String)}, refusing the URL when its host's lookup has no answer within
+     * {@code lookupBound} (JF-619). A resolver that drops a query answers only once it gives up, 30 s
+     * on macOS; the lookup goes on without the caller, and until it ends a later bounded call for the
+     * same host is refused at once.
+     *
+     * @throws SecurityException on every condition {@link #assertUrlSafe(String)} rejects, and when
+     *         the lookup has no answer within {@code lookupBound}
+     */
+    public static void assertUrlSafe(@NonNull String url, @NonNull Duration lookupBound) {
+        checkUrl(url, lookupBound);
+    }
+
+    private static void checkUrl(String url, @Nullable Duration lookupBound) {
         rejectParserDifferentialChars(url);
         var uri = parse(url);
         var authority = uri.getRawAuthority();
@@ -381,7 +521,7 @@ public final class SsrfGuard {
         if (host == null) return; // assertSafeScheme already threw for null host
         if (isLikelyIpLiteral(host)) return; // literal IPs were checked in assertSafeScheme
         try {
-            for (var addr : allByName(host)) {
+            for (var addr : lookupBound == null ? allByName(host) : allByNameWithin(host, lookupBound)) {
                 if (isUnsafe(addr)) {
                     throw new BlockedAddressException(
                             BLOCKED_ADDRESS_MSG
@@ -389,8 +529,9 @@ public final class SsrfGuard {
                 }
             }
         } catch (UnknownHostException e) {
+            var unanswered = e instanceof UnansweredLookupException u ? " (no answer within " + format(u.bound) + ")" : "";
             throw new SecurityException(
-                    "SSRF guard: cannot resolve host: " + host, e);
+                    "SSRF guard: cannot resolve host: " + host + unanswered, e);
         }
     }
 
