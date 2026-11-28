@@ -285,7 +285,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void aSendersWaitingMessagesOnTelegramRunTogetherAsOneTurn() {
-        long convId = 5000L;
+        long convId = committedConversation("telegram");
         assertTrue(ConversationQueue.tryAcquire(convId, from("First", "telegram", "u1", false)));
         assertFalse(ConversationQueue.tryAcquire(convId, from("Second", "telegram", "u1", false)));
         assertFalse(ConversationQueue.tryAcquire(convId, from("Third", "telegram", "u1", false)));
@@ -298,7 +298,7 @@ class ConversationQueueTest extends UnitTest {
     @Test
     void waitingMessagesOnSlackAndWhatsAppRunTogetherToo() {
         for (var channel : List.of("slack", "whatsapp")) {
-            long convId = 5010L + channel.length();
+            long convId = committedConversation(channel);
             ConversationQueue.tryAcquire(convId, from("First", channel, "u1", false));
             ConversationQueue.tryAcquire(convId, from("Second", channel, "u1", false));
             ConversationQueue.tryAcquire(convId, from("Third", channel, "u1", false));
@@ -310,7 +310,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void eachMembersRunOfMessagesInAGroupIsItsOwnTurnInArrivalOrder() {
-        long convId = 5020L;
+        long convId = committedConversation("telegram");
         ConversationQueue.tryAcquire(convId, from("running", "telegram", "u0", false));
         for (var m : List.of(new String[]{"a1", "u1"}, new String[]{"a2", "u1"}, new String[]{"b1", "u2"},
                 new String[]{"a3", "u1"})) {
@@ -325,7 +325,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void anOwnersMessageFromChatNeverJoinsAChannelSendersBatch() {
-        long convId = 5030L;
+        long convId = committedConversation("telegram");
         ConversationQueue.tryAcquire(convId, from("running", "telegram", "u1", false));
         ConversationQueue.tryAcquire(convId, from("customer 1", "telegram", "u1", false));
         ConversationQueue.tryAcquire(convId, from("operator", "web", null, true));
@@ -339,7 +339,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void anOwnersAndAGuestsMessageFromOneSenderIdAreNotBatched() {
-        long convId = 5035L;
+        long convId = committedConversation("telegram");
         ConversationQueue.tryAcquire(convId, from("running", "telegram", "u1", true));
         ConversationQueue.tryAcquire(convId, from("owner", "telegram", "u1", true));
         ConversationQueue.tryAcquire(convId, from("guest", "telegram", "u1", false));
@@ -373,7 +373,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void aWaitingSubagentResultRunsAloneAndIsNotFoldedIntoASendersBatch() {
-        long convId = 5060L;
+        long convId = committedConversation("telegram");
         ConversationQueue.tryAcquire(convId, from("running", "telegram", "u1", false));
         ConversationQueue.tryAcquire(convId, from("one", "telegram", "u1", false));
         ConversationQueue.tryAcquire(convId, new QueuedMessage("[subagent result]", "telegram", "peer", agent, true));
@@ -386,7 +386,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void aBatchKeepsOwnershipSoANewArrivalQueuesBehindIt() {
-        long convId = 7004L;
+        long convId = committedConversation("telegram");
         try {
             ConversationQueue.tryAcquire(convId, from("A", "telegram", "u1", false));
             ConversationQueue.tryAcquire(convId, from("B", "telegram", "u1", false));
@@ -442,7 +442,7 @@ class ConversationQueueTest extends UnitTest {
     @Test
     void aQueuedMessageKeepsItsAttachmentsThroughTheDrain() {
         var photo = new services.AttachmentService.Input("att-15140", "photo.jpg", "image/jpeg", 10, "IMAGE");
-        long convId = 15140L;
+        long convId = committedConversation("telegram");
         assertTrue(ConversationQueue.tryAcquire(convId, new QueuedMessage("owner", "telegram", "p", agent)));
         assertFalse(ConversationQueue.tryAcquire(convId,
                 new QueuedMessage("with photo", "telegram", "p", agent, List.of(photo))));
@@ -788,7 +788,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void stopEndsARestoredMessagesRunAndTheRestoredOnesBehindItRunInOrder() {
-        long convId = 12013L;
+        long convId = -12013L;
         try {
             // Three members' messages, so the drain hands them on one at a time rather than as one sender's batch.
             var gen = ConversationQueue.tryAcquireRestored(convId, List.of(from("R1", "telegram", "m1", false),
@@ -801,7 +801,7 @@ class ConversationQueueTest extends UnitTest {
             assertEquals(List.of("R3"), texts(ConversationQueue.waiting(convId, null, null)), "R2 took the conversation");
             assertTrue(ConversationQueue.drain(convId, gen).isEmpty(), "the stopped run's late drain runs nothing");
         } finally {
-            ConversationQueue.forgetForTest(convId);
+            forgetOnceReleased(convId);
         }
     }
 
@@ -982,7 +982,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void aHandOffLeavesAStoppedChannelTurnsFlagSetSoItsLateWritesDrop() {
-        long convId = 12010L;
+        long convId = committedConversation("telegram");
         ConversationQueue.drain(convId, ConversationQueue.tryAcquireOwnership(convId,
                 new QueuedMessage("earlier", "telegram", "peer", agent), null));
         // A channel turn's own flag is the conversation's shared flag, read before it acquires.
@@ -1216,7 +1216,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void anOperatorStopEndsAWebTurnThatPassedNoCancelFlagAndKeepsItsQueueInOrder() {
-        long convId = 17003L;
+        long convId = -17003L;
         try {
             var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
             var flag = ConversationQueue.ownerCancel(convId, gen);
@@ -1229,13 +1229,14 @@ class ConversationQueueTest extends UnitTest {
             // B's run finds no conversation behind this id and only releases it, so C stays where it waits.
             assertEquals(List.of("C"), texts(ConversationQueue.waiting(convId, null, null)), "B took the conversation");
         } finally {
-            ConversationQueue.forgetForTest(convId);
+            forgetOnceReleased(convId);
         }
     }
 
     @Test
     void anOperatorStopEndsADrainedChannelTurnSendingItsChannelTheNoticeAndHandsTheConversationOn() {
-        long convId = 17009L;
+        // No conversation holds this id, so B's and C's stored copies fail too: a real one would run C's turn.
+        long convId = -17009L;
         try {
             var gen = ConversationQueue.tryAcquireOwnership(convId,
                     new QueuedMessage("A", "telegram", "peer", agent), null);
@@ -1257,7 +1258,7 @@ class ConversationQueueTest extends UnitTest {
             assertSame(drained, ConversationQueue.ownerCancel(convId, gen),
                     "a run the stop overtook reads the flag the stop set");
         } finally {
-            ConversationQueue.forgetForTest(convId);
+            forgetOnceReleased(convId);
         }
     }
 
@@ -1318,7 +1319,7 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void anOperatorStopEndsAWebTurnHoldingItsOwnFlagAndHandsTheConversationToTheMessageQueuedFirst() {
-        long convId = 17005L;
+        long convId = -17005L;
         var flag = new AtomicBoolean();
         try {
             ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), flag);
@@ -1331,7 +1332,7 @@ class ConversationQueueTest extends UnitTest {
             assertTrue(flag.get());
             assertEquals(List.of("C", "D"), texts(ConversationQueue.waiting(convId, null, null)), "B took the conversation");
         } finally {
-            ConversationQueue.forgetForTest(convId);
+            forgetOnceReleased(convId);
         }
     }
 
@@ -1402,7 +1403,8 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void aStopNamingADrainedTurnThatHandedTheConversationOnChangesNothingAndTheNextRunsOn() {
-        long convId = 17015L;
+        // No conversation holds this id, so A's, B's and C's stored copies fail too: a real one would run C's turn.
+        long convId = -17015L;
         services.ConversationTurnStream.Turn running = null;
         try {
             // Each from its own member, so each drain hands on one turn rather than one sender's batch.
@@ -1431,14 +1433,14 @@ class ConversationQueueTest extends UnitTest {
             assertTrue(bFlag.get());
         } finally {
             if (running != null) running.stop();
-            ConversationQueue.forgetForTest(convId);
+            forgetOnceReleased(convId);
         }
     }
 
     @Test
     void aStopNamingTheRunningWebTurnStopsItAndKeepsItsQueueAsAStopNamingNoneDoes() {
-        long named = 17016L;
-        long unnamed = 17017L;
+        long named = -17016L;
+        long unnamed = -17017L;
         var namedFlag = new AtomicBoolean();
         var unnamedFlag = new AtomicBoolean();
         try {
@@ -1461,8 +1463,8 @@ class ConversationQueueTest extends UnitTest {
             assertTrue(namedFlag.get());
             assertTrue(unnamedFlag.get());
         } finally {
-            ConversationQueue.forgetForTest(named);
-            ConversationQueue.forgetForTest(unnamed);
+            forgetOnceReleased(named);
+            forgetOnceReleased(unnamed);
         }
     }
 
@@ -1492,8 +1494,7 @@ class ConversationQueueTest extends UnitTest {
                     ConversationQueue.stopOperatorTurn(convId, "telegram", true, a));
         } finally {
             sent.countDown();
-            for (int i = 0; i < 200 && ConversationQueue.isBusy(convId); i++) sleep(50);
-            ConversationQueue.forgetForTest(convId);
+            forgetOnceReleased(convId);
         }
     }
 
@@ -1619,23 +1620,20 @@ class ConversationQueueTest extends UnitTest {
 
     @Test
     void aClearDeletesTheStoredRowsOfTheChannelMessagesItDrops() {
-        var conv = services.ConversationService.create(agent, "telegram", "jf227-clear-rows");
-        // A queued message's row is written on a thread of its own, which must find the conversation committed.
-        play.db.jpa.JPA.em().getTransaction().commit();
-        play.db.jpa.JPA.em().getTransaction().begin();
+        long convId = committedConversation("telegram");
         try {
-            ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "telegram", conv.peerId, agent), null);
-            ConversationQueue.tryAcquire(conv.id, new QueuedMessage("B", "telegram", conv.peerId, agent));
-            ConversationQueue.tryAcquire(conv.id, new QueuedMessage("C", "telegram", conv.peerId, agent));
-            assertEquals(2L, models.PendingInbound.count("conversation.id = ?1", conv.id),
+            ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "telegram", "peer", agent), null);
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "telegram", "peer", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "telegram", "peer", agent));
+            assertEquals(2L, models.PendingInbound.count("conversation.id = ?1", convId),
                     "test precondition: the queued channel messages are stored");
 
-            assertEquals(2, ConversationQueue.clearWaiting(conv.id, null, null));
+            assertEquals(2, ConversationQueue.clearWaiting(convId, null, null));
 
-            assertEquals(0L, models.PendingInbound.count("conversation.id = ?1", conv.id),
+            assertEquals(0L, models.PendingInbound.count("conversation.id = ?1", convId),
                     "a restart finds none of them to run");
         } finally {
-            ConversationQueue.forgetForTest(conv.id);
+            ConversationQueue.forgetForTest(convId);
         }
     }
 
@@ -1875,6 +1873,27 @@ class ConversationQueueTest extends UnitTest {
 
     private static java.util.Map<String, Object> busy(long convId, boolean busy) {
         return java.util.Map.of("conversationId", convId, "busy", busy);
+    }
+
+    /**
+     * A conversation the queue can store a channel message for: it writes the row on a thread of its own, in its own
+     * transaction, which sees only what this test has committed, the agent included.
+     */
+    private long committedConversation(String channel) {
+        var conv = services.ConversationService.create(agent, channel, "peer");
+        play.db.jpa.JPA.em().getTransaction().commit();
+        play.db.jpa.JPA.em().getTransaction().begin();
+        return conv.id;
+    }
+
+    /**
+     * Forgets {@code convId} once a stop's hand-on or notice, each a thread of its own, has let it go, so neither runs
+     * on into the next test. A test that hands the conversation on uses a negative id, which no conversation row holds,
+     * so the hand-on's run releases it without running a turn (JF-238).
+     */
+    private static void forgetOnceReleased(long convId) {
+        for (int i = 0; i < 200 && ConversationQueue.isBusy(convId); i++) sleep(50);
+        ConversationQueue.forgetForTest(convId);
     }
 
     private static void sleep(long ms) {
