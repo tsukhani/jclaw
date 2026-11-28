@@ -224,7 +224,8 @@ public final class SsrfGuard {
             var unanswered = TEST_UNANSWERED_HOSTS.get();
             return () -> {
                 try {
-                    unanswered.released().await(unanswered.resolverTimeout().toNanos(), TimeUnit.NANOSECONDS);
+                    // Released or timed out, a dropped query ends the same way: no such host.
+                    var _ = unanswered.released().await(unanswered.resolverTimeout().toNanos(), TimeUnit.NANOSECONDS);
                 } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
